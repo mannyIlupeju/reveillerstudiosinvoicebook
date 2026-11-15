@@ -7,7 +7,7 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, dayLabel, fmt } from '../
 import { parseDate, parseMoney } from '../lib/parse';
 
 type Row = Record<string, string>;
-type Mapping = { date: string; desc: string; party: string; amount: string; debit: string; credit: string; mode: 'signed' | 'split' };
+type Mapping = { date: string; desc: string; party: string; amount: string; debit: string; credit: string; category: string; mode: 'signed' | 'split' };
 
 // Guess which column is which from common bank export headers (Wealthsimple, RBC, TD, etc.).
 function guess(headers: string[]): Mapping {
@@ -20,6 +20,7 @@ function guess(headers: string[]): Mapping {
     party: find(/payee|merchant|name|vendor/i),
     amount: find(/^amount$/i, /amount|value|cad/i),
     debit, credit,
+    category: find(/^category$/i, /category/i),
     mode: debit && credit && !find(/^amount$/i) ? 'split' : 'signed',
   };
 }
@@ -81,7 +82,10 @@ export default function ImportCsv() {
       const party = (map.party ? r[map.party] : '')?.trim() || desc.split(/\s{2,}| - /)[0].slice(0, 60);
       const type: 'EXPENSE' | 'INCOME' = cents >= 0 ? 'INCOME' : 'EXPENSE';
       const ok = !!date && Number.isFinite(cents) && cents !== 0;
-      return { idx, ok, date, amountCents: Math.abs(cents), type, party, description: desc === party ? '' : desc, category: overrides[idx] || categorize(`${party} ${desc}`, type) };
+      // A Category column wins when it names one of the app's categories; otherwise guess from the text.
+      const list = type === 'INCOME' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+      const given = map.category ? list.find((c) => c.toLowerCase() === (r[map.category] || '').trim().toLowerCase()) : undefined;
+      return { idx, ok, date, amountCents: Math.abs(cents), type, party, description: desc === party ? '' : desc, category: overrides[idx] || given || categorize(`${party} ${desc}`, type) };
     });
   }, [rows, map, flip, overrides]);
   const good = preview.filter((p) => p.ok && !skip[p.idx]);
@@ -117,6 +121,7 @@ export default function ImportCsv() {
             {sel('date', 'Date column')}
             {sel('desc', 'Description column')}
             {sel('party', 'Payee column', true)}
+            {sel('category', 'Category column', true)}
             <label className="field">Amounts are
               <select value={map.mode} onChange={(e) => setMap({ ...map, mode: e.target.value as Mapping['mode'] })}>
                 <option value="signed">One column, negative = money out</option>
