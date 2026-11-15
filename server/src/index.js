@@ -13,6 +13,7 @@ import txnRoutes, { receipts, importer } from './routes/txns.js';
 import { runs, budgets, recurring, settings, activity } from './routes/misc.js';
 import invoiceRoutes, { publicInvoices, shopifyWebhook } from './routes/invoices.js';
 import inventoryRoutes from './routes/inventory.js';
+import supplierRoutes, { fxRoutes } from './routes/suppliers.js';
 import { runJobs } from './jobs.js';
 
 const app = express();
@@ -58,6 +59,8 @@ app.use('/api/budgets', budgets);
 app.use('/api/recurring', recurring);
 app.use('/api/invoices', invoiceRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/suppliers', supplierRoutes);
+app.use('/api/fx', fxRoutes);
 app.use('/api/settings', settings);
 app.use('/api/activity', activity);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found.')));

@@ -27,8 +27,13 @@ const txnBody = z.object({
   description: z.string().trim().max(500).default(''),
   line: z.enum(LINES).default('Shared'),
   runId: z.string().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
+  originalAmountCents: z.number().int().positive().max(1e10).nullable().optional(),
+  originalCurrency: z.enum(['USD', 'EUR', 'GBP', 'CNY']).nullable().optional(),
+  fxRate: z.coerce.number().positive().max(1000).nullable().optional(),
 }).superRefine((v, ctx) => {
   const list = v.type === 'INCOME' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  if (Boolean(v.originalCurrency) !== Boolean(v.originalAmountCents)) ctx.addIssue({ code: 'custom', path: ['originalAmountCents'], message: 'needs both an amount and a currency' });
   if (!list.includes(v.category)) ctx.addIssue({ code: 'custom', path: ['category'], message: 'is not a known category' });
   if (v.type === 'INCOME' && v.runId) ctx.addIssue({ code: 'custom', path: ['runId'], message: 'only expenses can belong to a production run' });
 });
@@ -51,14 +56,16 @@ r.get('/', ah(async (req, res) => {
 r.get('/export.csv', ah(async (req, res) => {
   const { where, params } = range(req.query);
   const rows = await q(
-    `SELECT t.*, pr.name AS run_name, (SELECT count(*)::int FROM receipts r WHERE r.transaction_id = t.id) AS receipt_count
-     FROM transactions t LEFT JOIN production_runs pr ON pr.id = t.run_id ${where} ORDER BY t.date, t.created_at`,
+    `SELECT t.*, pr.name AS run_name, sp.name AS supplier_name, (SELECT count(*)::int FROM receipts r WHERE r.transaction_id = t.id) AS receipt_count
+     FROM transactions t LEFT JOIN production_runs pr ON pr.id = t.run_id LEFT JOIN suppliers sp ON sp.id = t.supplier_id ${where} ORDER BY t.date, t.created_at`,
     params,
   );
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const lines = ['Date,Type,Amount CAD,Vendor/Customer,Category,Line,Note,Production run,Source,Receipts'];
+  const lines = ['Date,Type,Amount CAD,Original amount,Currency,Vendor/Customer,Supplier,Category,Line,Note,Production run,Source,Receipts'];
   for (const t of rows) {
-    lines.push([t.date, t.type === 'INCOME' ? 'Money in' : 'Money out', (t.amountCents / 100).toFixed(2), t.party, t.category, t.line, t.description, t.runName || '', t.source.toLowerCase(), t.receiptCount].map(esc).join(','));
+    lines.push([t.date, t.type === 'INCOME' ? 'Money in' : 'Money out', (t.amountCents / 100).toFixed(2),
+      t.originalAmountCents ? (t.originalAmountCents / 100).toFixed(2) : '', t.originalCurrency || 'CAD', t.party, t.supplierName || '',
+      t.category, t.line, t.description, t.runName || '', t.source.toLowerCase(), t.receiptCount].map(esc).join(','));
   }
   const name = `reveiller-books-${req.query.from || 'all'}${req.query.to ? `-to-${req.query.to}` : ''}.csv`.replace(/[^\w.-]/g, '');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -66,18 +73,21 @@ r.get('/export.csv', ah(async (req, res) => {
   res.send('﻿' + lines.join('\r\n'));
 }));
 
-async function checkRun(runId) {
+async function checkRun(runId, supplierId) {
   if (runId && !(await one('SELECT id FROM production_runs WHERE id = $1', [runId]))) throw new HttpError(400, 'That production run no longer exists.');
+  if (supplierId && !(await one('SELECT id FROM suppliers WHERE id = $1', [supplierId]))) throw new HttpError(400, 'That supplier no longer exists.');
 }
+const fxCols = (b) => (b.originalCurrency ? [b.originalAmountCents, b.originalCurrency, b.fxRate ?? null] : [null, null, null]);
 
 r.post('/', requireRole('EDITOR'), ah(async (req, res) => {
   const b = parse(txnBody, req.body);
-  await checkRun(b.runId);
+  await checkRun(b.runId, b.supplierId);
   const id = newId();
   await q(
-    `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, run_id, source, created_by_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'APP',$10)`,
-    [id, b.type, b.amountCents, b.date, b.party, b.category, b.description, b.line, b.runId || null, req.user.id],
+    `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, run_id, supplier_id,
+       original_amount_cents, original_currency, fx_rate, source, created_by_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'APP',$14)`,
+    [id, b.type, b.amountCents, b.date, b.party, b.category, b.description, b.line, b.runId || null, b.supplierId || null, ...fxCols(b), req.user.id],
   );
   await audit(req.user.id, 'create', 'transaction', id, `${b.type === 'INCOME' ? 'Money in' : 'Money out'} ${money(b.amountCents)} ${b.party}`);
   res.status(201).json({ txn: await getTxn(id) });
@@ -87,10 +97,11 @@ r.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM transactions WHERE id = $1', [req.params.id]);
   if (!existing) throw new HttpError(404, 'Entry not found.');
   const b = parse(txnBody, { ...existing, ...req.body });
-  await checkRun(b.runId);
+  await checkRun(b.runId, b.supplierId);
   await q(
-    `UPDATE transactions SET type=$2, amount_cents=$3, date=$4, party=$5, category=$6, description=$7, line=$8, run_id=$9, updated_at=now() WHERE id=$1`,
-    [existing.id, b.type, b.amountCents, b.date, b.party, b.category, b.description, b.line, b.runId || null],
+    `UPDATE transactions SET type=$2, amount_cents=$3, date=$4, party=$5, category=$6, description=$7, line=$8, run_id=$9, supplier_id=$10,
+       original_amount_cents=$11, original_currency=$12, fx_rate=$13, updated_at=now() WHERE id=$1`,
+    [existing.id, b.type, b.amountCents, b.date, b.party, b.category, b.description, b.line, b.runId || null, b.supplierId || null, ...fxCols(b)],
   );
   await audit(req.user.id, 'update', 'transaction', existing.id, `Edited ${b.party || 'entry'} (${money(existing.amountCents)} → ${money(b.amountCents)})`);
   res.json({ txn: await getTxn(existing.id) });

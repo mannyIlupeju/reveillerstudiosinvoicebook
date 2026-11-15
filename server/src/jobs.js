@@ -2,6 +2,7 @@ import { q, tx, newId, isUniqueViolation } from './db.js';
 import { today, nextCycle, audit, money } from './util.js';
 import { shopifyConfigured, draftOrderPaymentStatus } from './shopify.js';
 import { syncInventory } from './inventory.js';
+import { toCad } from './fx.js';
 
 // Log every recurring charge that has come due. Safe to run repeatedly and from
 // several processes at once: each charge has a unique recurring_key.
@@ -36,12 +37,20 @@ export async function runRecurring() {
 export async function recordInvoicePayment(inv, { date, source = 'INVOICE', userId = null, orderName = null, orderId = null } = {}) {
   const paidDate = date || today();
   const type = inv.kind === 'RECEIVABLE' ? 'INCOME' : 'EXPENSE';
-  const description = [inv.number ? `Invoice ${inv.number}` : 'Invoice payment', orderName ? `Shopify ${orderName}` : ''].filter(Boolean).join(' · ');
+  const description = [inv.number ? `Invoice ${inv.number}` : inv.notes || 'Bill payment', orderName ? `Shopify ${orderName}` : ''].filter(Boolean).join(' · ');
+  // A bill in a foreign currency is converted at the payment day's rate, since that's what actually left the account.
+  let cents = inv.amountCents;
+  let rate = inv.fxRate != null ? Number(inv.fxRate) : null;
+  if (inv.originalCurrency && inv.originalAmountCents) {
+    try { ({ cadCents: cents, rate } = await toCad(inv.originalAmountCents, inv.originalCurrency, paidDate)); } catch (e) { console.error('fx at payment failed, using bill amount:', e.message); }
+  }
   await tx(async (c) => {
     await q(
-      `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, source, invoice_id, created_by_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (invoice_id) DO NOTHING`,
-      [newId(), type, inv.amountCents, paidDate, inv.party, inv.category, description, inv.line, source, inv.id, userId],
+      `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, source, invoice_id, created_by_id,
+         supplier_id, original_amount_cents, original_currency, fx_rate, run_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT (invoice_id) DO NOTHING`,
+      [newId(), type, cents, paidDate, inv.party, inv.category, description, inv.line, source, inv.id, userId,
+        inv.supplierId || null, inv.originalAmountCents || null, inv.originalCurrency || null, inv.originalCurrency ? rate : null, inv.kind === 'PAYABLE' ? inv.runId || null : null],
       c,
     );
     await q(

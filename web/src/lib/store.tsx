@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
-import type { Invoice, Rule, Run, Settings, Txn, User } from './types';
+import type { Invoice, Rule, Run, Settings, Supplier, Txn, User } from './types';
 
 /* ---------- auth ---------- */
 type AuthCtx = { user: User | null; needsSetup: boolean; ready: boolean; setUser: (u: User | null) => void; signOut: () => Promise<void> };
@@ -36,6 +36,7 @@ type BooksCtx = {
   runs: Run[];
   rules: Rule[];
   invoices: Invoice[];
+  suppliers: Supplier[];
   limits: Record<string, number>;
   settings: Settings | null;
   shopify: { configured: boolean; store: string };
@@ -48,7 +49,7 @@ export const useBooks = () => useContext(Books);
 
 export function BooksProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<Omit<BooksCtx, 'reload' | 'loading' | 'error'>>({
-    txns: [], runs: [], rules: [], invoices: [], limits: {}, settings: null, shopify: { configured: false, store: '' },
+    txns: [], runs: [], rules: [], invoices: [], suppliers: [], limits: {}, settings: null, shopify: { configured: false, store: '' },
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -57,16 +58,17 @@ export function BooksProvider({ children }: { children: ReactNode }) {
   const reload = useCallback(async () => {
     const my = ++seq.current;
     try {
-      const [t, r, rec, inv, b, s] = await Promise.all([
+      const [t, r, rec, inv, b, s, sup] = await Promise.all([
         api<{ txns: Txn[] }>('/txns'),
         api<{ runs: Run[] }>('/runs'),
         api<{ rules: Rule[] }>('/recurring'),
         api<{ invoices: Invoice[] }>('/invoices'),
         api<{ limits: Record<string, number> }>('/budgets'),
         api<{ settings: Settings; shopify: { configured: boolean; store: string } }>('/settings'),
+        api<{ suppliers: Supplier[] }>('/suppliers'),
       ]);
       if (my !== seq.current) return;
-      setState({ txns: t.txns, runs: r.runs, rules: rec.rules, invoices: inv.invoices, limits: b.limits, settings: s.settings, shopify: s.shopify });
+      setState({ txns: t.txns, runs: r.runs, rules: rec.rules, invoices: inv.invoices, suppliers: sup.suppliers, limits: b.limits, settings: s.settings, shopify: s.shopify });
       setError('');
     } catch (e: any) {
       if (my === seq.current) setError(e.message);

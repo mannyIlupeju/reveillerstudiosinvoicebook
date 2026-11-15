@@ -1,12 +1,13 @@
 import { useBooks } from '../lib/store';
-import { dayLabel, fmt } from '../lib/format';
+import { dayLabel, fmt, fmtCur } from '../lib/format';
 import type { Txn } from '../lib/types';
 
 const SOURCE: Record<string, string> = { RECURRING: 'Auto', INVOICE: 'Invoice', SHOPIFY: 'Shopify', IMPORT: 'Import' };
 
 export default function TxnTable({ rows, onPick, compact }: { rows: Txn[]; onPick?: (t: Txn) => void; compact?: boolean }) {
-  const { runs } = useBooks();
+  const { runs, suppliers } = useBooks();
   const runName = (id: string | null) => (id ? runs.find((r) => r.id === id)?.name : '');
+  const supplierName = (id: string | null) => (id ? suppliers.find((x) => x.id === id)?.name : '');
   return (
     <div className="tablewrap">
       <table>
@@ -19,11 +20,11 @@ export default function TxnTable({ rows, onPick, compact }: { rows: Txn[]; onPic
               <td>
                 {t.party || 'Untitled'}
                 {t.receipts.length > 0 && <span className="chip">{t.receipts.length === 1 ? 'Receipt' : `${t.receipts.length} receipts`}</span>}
-                <span className="sub">{[t.description, runName(t.runId) && `Run: ${runName(t.runId)}`].filter(Boolean).join(' · ')}</span>
+                <span className="sub">{[t.description, supplierName(t.supplierId) && supplierName(t.supplierId) !== t.party && `Supplier: ${supplierName(t.supplierId)}`, runName(t.runId) && `Run: ${runName(t.runId)}`].filter(Boolean).join(' · ')}</span>
                 <span className="sub show-sm">{t.category}</span>
               </td>
               <td className="hide-sm">{t.category}{t.line !== 'Shared' && <span className="chip">{t.line}</span>}</td>
-              <td className={`amt ${t.type === 'INCOME' ? 'pos' : ''}`}>{t.type === 'INCOME' ? '+' : '−'}{fmt(t.amountCents)}</td>
+              <td className={`amt ${t.type === 'INCOME' ? 'pos' : ''}`}>{t.type === 'INCOME' ? '+' : '−'}{fmt(t.amountCents)}{t.originalCurrency && t.originalAmountCents && <span className="sub">{fmtCur(t.originalAmountCents, t.originalCurrency)}</span>}</td>
               <td className="sub hide-sm">{SOURCE[t.source] || ''}</td>
             </tr>
           ))}

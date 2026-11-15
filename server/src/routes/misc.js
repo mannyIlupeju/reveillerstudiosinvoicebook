@@ -18,6 +18,7 @@ const runBody = z.object({
   date: z.string().regex(DATE_RE),
   retailPriceCents: z.number().int().nonnegative().nullable().optional(),
   wholesalePriceCents: z.number().int().nonnegative().nullable().optional(),
+  supplierId: z.string().nullable().optional(),
 });
 const SELECT_RUNS = `
   SELECT pr.*, COALESCE((
@@ -87,8 +88,8 @@ runs.delete('/:id/history-costs/:costId', requireRole('EDITOR'), ah(async (req, 
 runs.post('/', requireRole('EDITOR'), ah(async (req, res) => {
   const b = parse(runBody, req.body);
   const run = await one(
-    `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-    [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null],
+    `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents, supplier_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null],
   );
   await audit(req.user.id, 'create', 'run', run.id, `Production run “${run.name}” (${run.units} units)`);
   res.status(201).json({ run: { ...run, historyCosts: [] } });
@@ -98,11 +99,11 @@ runs.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
   if (!existing) throw new HttpError(404, 'Run not found.');
   const b = parse(runBody, { ...existing, ...req.body });
   const run = await one(
-    `UPDATE production_runs SET name=$2, line=$3, status=$4, units=$5, date=$6, retail_price_cents=$7, wholesale_price_cents=$8 WHERE id=$1 RETURNING *`,
-    [existing.id, b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null],
+    `UPDATE production_runs SET name=$2, line=$3, status=$4, units=$5, date=$6, retail_price_cents=$7, wholesale_price_cents=$8, supplier_id=$9 WHERE id=$1 RETURNING *`,
+    [existing.id, b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null],
   );
   await audit(req.user.id, 'update', 'run', run.id, `Edited run “${run.name}”`);
-  res.json({ run });
+  res.json({ run: (await one(`${SELECT_RUNS} WHERE pr.id = $1`, [run.id])) });
 }));
 runs.delete('/:id', requireRole('EDITOR'), ah(async (req, res) => {
   const run = await one('DELETE FROM production_runs WHERE id = $1 RETURNING *', [req.params.id]);

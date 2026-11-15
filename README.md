@@ -15,6 +15,7 @@ Bookkeeping for Reveiller Studios: expenses and income, production runs with uni
 | Production runs, budgets, recurring rules, settings, activity log | `server/src/routes/misc.js` |
 | Invoices, client invoice page, Shopify payments | `server/src/routes/invoices.js`, `server/src/shopify.js` |
 | Inventory | `server/src/inventory.js`, `routes/inventory.js`. Mirrors Shopify product variants and stock. Unit cost, linked production run and low-stock level are set in the app and survive every sync. |
+| Suppliers and currencies | `server/src/routes/suppliers.js`, `server/src/fx.js`. Suppliers can be set on production-type expenses, bills and runs. Amounts in USD, EUR, GBP or CNY are converted to CAD with the Bank of Canada daily rate (cached in `fx_rates`); the original amount is kept. A foreign bill is converted again at its payment date. Supplier order sheets can be imported. |
 | Scheduled jobs | `server/src/jobs.js`. Every 15 minutes the server logs any recurring charges that have come due, asks Shopify whether open invoices have been paid, and refreshes inventory. All are safe to run repeatedly. |
 | Database schema | `server/migrations/*.sql`, applied automatically on startup |
 

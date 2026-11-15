@@ -1,3 +1,4 @@
+export type Currency = 'USD' | 'EUR' | 'GBP' | 'CNY';
 export type Role = 'OWNER' | 'EDITOR' | 'VIEWER';
 export type User = { id: string; email: string; name: string; role: Role; active: boolean; createdAt: string };
 
@@ -12,6 +13,10 @@ export type Txn = {
   description: string;
   line: string;
   runId: string | null;
+  supplierId: string | null;
+  originalAmountCents: number | null;
+  originalCurrency: Currency | null;
+  fxRate: string | number | null;
   source: 'APP' | 'RECURRING' | 'INVOICE' | 'SHOPIFY' | 'IMPORT';
   invoiceId: string | null;
   createdById: string | null;
@@ -31,6 +36,7 @@ export type Run = {
   wholesalePriceCents: number | null;
   notes: string;
   source: 'APP' | 'IMPORT';
+  supplierId: string | null;
   historyCosts: HistoryCost[];
 };
 
@@ -66,6 +72,11 @@ export type Invoice = {
   shopifyInvoiceUrl: string | null;
   payLinkReady: boolean;
   sentAt: string | null;
+  supplierId: string | null;
+  runId: string | null;
+  originalAmountCents: number | null;
+  originalCurrency: Currency | null;
+  fxRate: string | number | null;
 };
 
 export type Settings = {
@@ -98,3 +109,8 @@ export type InventoryItem = {
   syncedAt: string;
 };
 export type SyncStatus = { at: string | null; ok: boolean | null; error: string | null; count: number };
+
+export type Supplier = {
+  id: string; name: string; contact: string; platform: string; email: string; website: string; notes: string; archived: boolean;
+  paidCents: number; paymentCount: number; owedCents: number; runCount: number; lastPaid: string | null;
+};

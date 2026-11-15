@@ -6,13 +6,14 @@ import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
 import { LINES, RUN_STATUSES, centsInput, dayLabelY, fmt, toCents, today } from '../lib/format';
 import { runStats } from '../lib/derive';
+import { SupplierSelect } from '../components/SupplierFields';
 import type { Run, Txn } from '../lib/types';
 
 const pct = (v: number | null) => (v === null ? '—' : `${Math.round(v * 100)}%`);
 
 export default function Runs() {
   const { user } = useAuth();
-  const { runs, txns } = useBooks();
+  const { runs, txns, suppliers } = useBooks();
   const [editing, setEditing] = useState<Run | 'new' | null>(null);
   const [costFor, setCostFor] = useState<Run | null>(null);
   const editor = canEdit(user);
@@ -36,7 +37,7 @@ export default function Runs() {
               <article className="run" key={r.id}>
                 <div>
                   <h3>{r.name}</h3>
-                  <div className="meta"><span className="chip">{r.line}</span><span>{dayLabelY(r.date)}</span><span>{r.units} units</span>
+                  <div className="meta"><span className="chip">{r.line}</span>{r.supplierId && <span>{suppliers.find((x) => x.id === r.supplierId)?.name}</span>}<span>{dayLabelY(r.date)}</span><span>{r.units} units</span>
                     <span className={`pill ${r.status === 'Selling' ? 'good' : r.status === 'In production' ? 'accent' : ''}`}>{r.status}</span></div>
                 </div>
                 <div className="kv">
@@ -80,6 +81,7 @@ function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
   const [date, setDate] = useState(run?.date || today());
   const [retail, setRetail] = useState(centsInput(run?.retailPriceCents));
   const [wholesale, setWholesale] = useState(centsInput(run?.wholesalePriceCents));
+  const [supplierId, setSupplierId] = useState(run?.supplierId || '');
 
   const save = async () => {
     const u = Math.round(Number(units));
@@ -88,7 +90,7 @@ function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
     const price = (v: string) => (v.trim() ? toCents(v) : null);
     const r = price(retail), w = price(wholesale);
     if (Number.isNaN(r) || Number.isNaN(w)) throw new Error('Check the prices.');
-    const body = { name, line, status, units: u, date, retailPriceCents: r, wholesalePriceCents: w };
+    const body = { name, line, status, units: u, date, retailPriceCents: r, wholesalePriceCents: w, supplierId: supplierId || null };
     if (run) await api(`/runs/${run.id}`, { method: 'PATCH', body }); else await api('/runs', { body });
     await reload();
     toast(run ? 'Run updated' : 'Run created');
@@ -104,6 +106,7 @@ function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
       <label className="full">Run name<input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. RVS Drop 03 hoodies" autoFocus /></label>
       <label>Line<select id="r-line" value={line} onChange={(e) => setLine(e.target.value)}>{LINES.map((l) => <option key={l}>{l}</option>)}</select></label>
       <label>Status<select id="r-status" value={status} onChange={(e) => setStatus(e.target.value)}>{RUN_STATUSES.map((s) => <option key={s}>{s}</option>)}</select></label>
+ <SupplierSelect value={supplierId} onChange={(id) => setSupplierId(id)} id="r-supplier" />
       <label>Units produced<input id="r-units" inputMode="numeric" value={units} onChange={(e) => setUnits(e.target.value)} /></label>
       <label>Start date<input id="r-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
       <label>Retail price<input id="r-retail" inputMode="decimal" value={retail} onChange={(e) => setRetail(e.target.value)} placeholder="Optional" /></label>

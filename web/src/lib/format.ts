@@ -49,3 +49,10 @@ export const dayLabelY = (s?: string | null) => (s ? parseD(s).toLocaleDateStrin
 export const longDate = (s?: string | null) => (s ? parseD(s).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : '');
 export const daysBetween = (a: string, b: string) => Math.round((parseD(b).getTime() - parseD(a).getTime()) / 864e5);
 export const sum = <T,>(arr: T[], f: (x: T) => number) => arr.reduce((a, x) => a + (f(x) || 0), 0);
+
+export const CURRENCIES = ['CAD', 'USD', 'EUR', 'GBP', 'CNY'] as const;
+const SYMBOL: Record<string, string> = { USD: 'US$', EUR: '€', GBP: '£', CNY: '¥', CAD: 'C$' };
+/** "US$424.75" */
+export const fmtCur = (cents: number, currency: string) => `${SYMBOL[currency] || currency + ' '}${((cents || 0) / 100).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/** Expense categories where tracking the supplier is most useful. */
+export const PRODUCTION_CATEGORIES = ['Production & Manufacturing', 'Blanks & Materials', 'Samples & Development', 'Packaging & Shipping'];

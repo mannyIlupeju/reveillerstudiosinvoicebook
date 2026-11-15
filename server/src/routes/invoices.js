@@ -28,11 +28,21 @@ const invBody = z.object({
   issueDate: z.string().regex(DATE_RE),
   dueDate: z.string().regex(DATE_RE),
   notes: z.string().trim().max(2000).default(''),
+  supplierId: z.string().nullable().optional(),
+  runId: z.string().nullable().optional(),
+  originalAmountCents: z.number().int().positive().max(1e10).nullable().optional(),
+  originalCurrency: z.enum(['USD', 'EUR', 'GBP', 'CNY']).nullable().optional(),
+  fxRate: z.coerce.number().positive().max(1000).nullable().optional(),
 }).superRefine((v, ctx) => {
+  if (Boolean(v.originalCurrency) !== Boolean(v.originalAmountCents)) ctx.addIssue({ code: 'custom', path: ['originalAmountCents'], message: 'needs both an amount and a currency' });
   const list = v.kind === 'RECEIVABLE' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
   if (!list.includes(v.category)) ctx.addIssue({ code: 'custom', path: ['category'], message: 'is not a known category' });
   if (!v.items.length && !(v.amountCents > 0)) ctx.addIssue({ code: 'custom', path: ['amountCents'], message: 'add line items or an amount' });
 });
+// Supplier and foreign currency apply to bills you owe, not to client invoices.
+const billCols = (b) => (b.kind === 'PAYABLE'
+  ? [b.supplierId || null, b.originalCurrency ? b.originalAmountCents : null, b.originalCurrency || null, b.originalCurrency ? b.fxRate ?? null : null, b.runId || null]
+  : [null, null, null, null, null]);
 const totalOf = (items) => items.reduce((a, it) => a + Math.round(it.quantity * it.unitPriceCents), 0);
 
 // Never send internal ids or Shopify ids to the browser beyond what the UI needs.
@@ -65,10 +75,11 @@ r.post('/', requireRole('EDITOR'), ah(async (req, res) => {
   const inv = await tx(async (c) => {
     const number = b.number || (b.kind === 'RECEIVABLE' ? await allocateNumber(c) : '');
     return one(
-      `INSERT INTO invoices (id, kind, number, party, client_email, items, amount_cents, category, line, issue_date, due_date, notes, public_token, created_by_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+      `INSERT INTO invoices (id, kind, number, party, client_email, items, amount_cents, category, line, issue_date, due_date, notes, public_token, created_by_id,
+         supplier_id, original_amount_cents, original_currency, fx_rate, run_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
       [newId(), b.kind, number, b.party, b.clientEmail, JSON.stringify(b.items), amountCents, b.category, b.line, b.issueDate, b.dueDate, b.notes,
-        b.kind === 'RECEIVABLE' ? newToken() : null, req.user.id],
+        b.kind === 'RECEIVABLE' ? newToken() : null, req.user.id, ...billCols(b)],
       c,
     );
   });
@@ -89,10 +100,11 @@ r.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
     try { await deleteDraftOrder(existing.shopifyDraftOrderId); } catch (e) { console.error('draft order delete failed', e.message); }
   }
   const inv = await one(
-    `UPDATE invoices SET number=$2, party=$3, client_email=$4, items=$5, amount_cents=$6, category=$7, line=$8, issue_date=$9, due_date=$10, notes=$11, updated_at=now()
+    `UPDATE invoices SET number=$2, party=$3, client_email=$4, items=$5, amount_cents=$6, category=$7, line=$8, issue_date=$9, due_date=$10, notes=$11,
+       supplier_id=$12, original_amount_cents=$13, original_currency=$14, fx_rate=$15, run_id=$16, updated_at=now()
        ${changed ? ', shopify_draft_order_id = NULL, shopify_invoice_url = NULL, sent_at = NULL' : ''}
      WHERE id = $1 RETURNING *`,
-    [existing.id, b.number, b.party, b.clientEmail, JSON.stringify(b.items), amountCents, b.category, b.line, b.issueDate, b.dueDate, b.notes],
+    [existing.id, b.number, b.party, b.clientEmail, JSON.stringify(b.items), amountCents, b.category, b.line, b.issueDate, b.dueDate, b.notes, ...billCols(b)],
   );
   await audit(req.user.id, 'update', 'invoice', inv.id, `Edited ${inv.number || 'bill'} ${inv.party}${changed ? ' (payment link updated)' : ''}`);
   const { invoice, payLinkError } = await autoPayLink(inv);

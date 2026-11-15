@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import Modal from './Modal';
 import { api } from '../lib/api';
 import { useBooks, useToast } from '../lib/store';
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, centsInput, toCents, today } from '../lib/format';
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, PRODUCTION_CATEGORIES, today } from '../lib/format';
+import { MoneyInput, SupplierSelect, moneyFrom, moneyToBody, type Money } from './SupplierFields';
 import type { Receipt, Txn } from '../lib/types';
 
 // Shrink phone photos before upload so receipts stay small in the database.
@@ -90,11 +91,12 @@ function ReceiptPicker({ saved, pending, onAdd, onRemovePending, onRemoveSaved }
 type Props = { txn?: Txn | null; preset?: Partial<Txn>; onClose: () => void };
 
 export default function TxnModal({ txn, preset = {}, onClose }: Props) {
-  const { runs, reload } = useBooks();
+  const { runs, suppliers, reload } = useBooks();
   const toast = useToast();
   const base = { type: 'EXPENSE', date: today(), line: 'Shared', category: 'Miscellaneous', ...preset, ...(txn || {}) } as Txn;
   const [type, setType] = useState<Txn['type']>(base.type);
-  const [amount, setAmount] = useState(centsInput(base.amountCents));
+  const [money, setMoney] = useState<Money>(moneyFrom(base.amountCents, base.originalAmountCents, base.originalCurrency, base.fxRate));
+  const [supplierId, setSupplierId] = useState(base.supplierId || '');
   const [date, setDate] = useState(base.date);
   const [party, setParty] = useState(base.party || '');
   const cats = type === 'INCOME' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
@@ -109,14 +111,21 @@ export default function TxnModal({ txn, preset = {}, onClose }: Props) {
     setType(t);
     const list = t === 'INCOME' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
     if (!list.includes(category)) setCategory(list[0]);
-    if (t === 'INCOME') setRunId('');
+    if (t === 'INCOME') { setRunId(''); setSupplierId(''); }
+  };
+  // Supplier is optional; it's offered for production-type costs, or whenever one is already set.
+  const showSupplier = type === 'EXPENSE' && (PRODUCTION_CATEGORIES.includes(category) || !!supplierId || !!runId);
+  const pickSupplier = (id: string, name?: string) => { setSupplierId(id); if (id && name && !party.trim()) setParty(name); };
+  const pickRun = (id: string) => {
+    setRunId(id);
+    const run = runs.find((r) => r.id === id);
+    if (run?.supplierId && !supplierId) pickSupplier(run.supplierId, suppliers.find((x) => x.id === run.supplierId)?.name);
   };
 
   const save = async () => {
-    const amountCents = toCents(amount);
-    if (!(amountCents > 0)) throw new Error('Enter an amount above zero.');
     if (!date) throw new Error('Pick a date.');
-    const body = { type, amountCents, date, party, category, description, line, runId: type === 'EXPENSE' && runId ? runId : null };
+    const body = { type, ...moneyToBody(money), date, party, category, description, line,
+      runId: type === 'EXPENSE' && runId ? runId : null, supplierId: type === 'EXPENSE' && supplierId ? supplierId : null };
     const res = txn ? await api<{ txn: Txn }>(`/txns/${txn.id}`, { method: 'PATCH', body }) : await api<{ txn: Txn }>('/txns', { body });
     for (const f of files) {
       try { await uploadReceipt(res.txn.id, f); } catch (e: any) { toast(`Saved, but ${f.name} didn’t upload: ${e.message}`); }
@@ -146,14 +155,15 @@ export default function TxnModal({ txn, preset = {}, onClose }: Props) {
         <label><input type="radio" name="type" checked={type === 'EXPENSE'} onChange={() => switchType('EXPENSE')} />Money out</label>
         <label><input type="radio" name="type" checked={type === 'INCOME'} onChange={() => switchType('INCOME')} />Money in</label>
       </div>
-      <label>Amount (CAD)<input id="t-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" autoFocus /></label>
+      <MoneyInput value={money} onChange={setMoney} date={date} idPrefix="t" />
       <label>Date<input id="t-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
       <label>{type === 'INCOME' ? 'Customer' : 'Vendor'}<input id="t-party" value={party} onChange={(e) => setParty(e.target.value)} placeholder={type === 'INCOME' ? 'e.g. Shopify payout' : 'e.g. Gildan, IB'} /></label>
       <label>Category<select id="t-category" value={category} onChange={(e) => setCategory(e.target.value)}>{cats.map((c) => <option key={c}>{c}</option>)}</select></label>
+      {showSupplier && <SupplierSelect value={supplierId} onChange={pickSupplier} id="t-supplier" />}
       <label className="full">Note<input id="t-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What was it for?" /></label>
       <label>Line<select id="t-line" value={line} onChange={(e) => setLine(e.target.value)}>{LINES.map((l) => <option key={l}>{l}</option>)}</select></label>
       {type === 'EXPENSE' && (
-        <label>Production run<select id="t-run" value={runId} onChange={(e) => setRunId(e.target.value)}>
+        <label>Production run<select id="t-run" value={runId} onChange={(e) => pickRun(e.target.value)}>
           <option value="">Not part of a run</option>
           {runs.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select></label>

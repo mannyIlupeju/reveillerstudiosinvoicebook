@@ -15,6 +15,8 @@ import Invoices from './pages/Invoices';
 import Inventory from './pages/Inventory';
 import ImportCsv from './pages/ImportCsv';
 import ImportRuns from './pages/ImportRuns';
+import Suppliers from './pages/Suppliers';
+import ImportSuppliers from './pages/ImportSuppliers';
 import Team from './pages/Team';
 import SettingsPage from './pages/Settings';
 
@@ -38,7 +40,7 @@ function Shell() {
   const [adding, setAdding] = useState(false);
   const editor = canEdit(user);
   const tabs: [string, string][] = [
-    ['/', 'Overview'], ['/transactions', 'Transactions'], ['/invoices', 'Invoices'], ['/inventory', 'Inventory'], ['/production', 'Production runs'],
+    ['/', 'Overview'], ['/transactions', 'Transactions'], ['/invoices', 'Invoices'], ['/inventory', 'Inventory'], ['/production', 'Production runs'], ['/suppliers', 'Suppliers'],
     ['/budgets', 'Budgets'], ['/recurring', 'Recurring'], ...(editor ? [['/import', 'Import'] as [string, string]] : []),
     ...(user?.role === 'OWNER' ? [['/team', 'Team'] as [string, string]] : []), ['/settings', 'Settings'],
   ];
@@ -70,6 +72,8 @@ function Shell() {
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/production" element={<Runs />} />
+            <Route path="/suppliers" element={<Suppliers />} />
+            <Route path="/suppliers/import" element={editor ? <ImportSuppliers /> : <Navigate to="/suppliers" />} />
             <Route path="/production/import" element={editor ? <ImportRuns /> : <Navigate to="/production" />} />
             <Route path="/budgets" element={<Budgets />} />
             <Route path="/recurring" element={<Recurring />} />

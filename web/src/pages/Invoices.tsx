@@ -2,15 +2,16 @@ import { useEffect, useState } from 'react';
 import Modal from '../components/Modal';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, addDays, centsInput, dayLabel, fmt, sum, toCents, today } from '../lib/format';
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, addDays, centsInput, dayLabel, fmt, fmtCur, sum, toCents, today } from '../lib/format';
 import { invStatus } from '../lib/derive';
+import { MoneyInput, SupplierSelect, moneyFrom, moneyToBody, type Money } from '../components/SupplierFields';
 import type { Invoice, Item } from '../lib/types';
 
 const PILL = { open: 'accent', overdue: 'crit', paid: 'good', void: '' } as const;
 
 export default function Invoices() {
   const { user } = useAuth();
-  const { invoices, shopify, reload } = useBooks();
+  const { invoices, shopify, suppliers, reload } = useBooks();
   const toast = useToast();
   const editor = canEdit(user);
   const [editing, setEditing] = useState<Invoice | { kind: Invoice['kind'] } | null>(null);
@@ -44,10 +45,10 @@ export default function Invoices() {
             const st = invStatus(i);
             return (
               <tr key={i.id}>
-                <td>{i.party}<span className="sub">{i.category}{i.sentAt ? ' · emailed' : i.payLinkReady ? ' · pay link ready' : ''}</span></td>
+                <td>{i.party}<span className="sub">{[i.category, i.supplierId && suppliers.find((x) => x.id === i.supplierId)?.name !== i.party && suppliers.find((x) => x.id === i.supplierId)?.name].filter(Boolean).join(' · ')}{i.sentAt ? ' · emailed' : i.payLinkReady ? ' · pay link ready' : ''}</span></td>
                 <td>{i.number ? `#${i.number}` : '—'}</td>
                 <td>{dayLabel(i.dueDate)}</td>
-                <td className="amt">{fmt(i.amountCents)}</td>
+                <td className="amt">{fmt(i.amountCents)}{i.originalCurrency && i.originalAmountCents && <span className="sub">{fmtCur(i.originalAmountCents, i.originalCurrency)}</span>}</td>
                 <td><span className={`pill ${PILL[st]}`}>{st}</span>{st === 'paid' && i.paidDate && <span className="sub">{dayLabel(i.paidDate)}</span>}</td>
                 <td className="actions">
                   {kind === 'RECEIVABLE' && i.status !== 'VOID' && <button className="btn small" onClick={() => setSharing(i)}>{i.status === 'OPEN' ? 'Send' : 'View'}</button>}
@@ -107,12 +108,16 @@ function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; 
   const [issueDate, setIssueDate] = useState(inv?.issueDate || today());
   const [dueDate, setDueDate] = useState(inv?.dueDate || addDays(today(), settings?.paymentTermsDays ?? 30));
   const [notes, setNotes] = useState(inv?.notes || '');
-  const [amount, setAmount] = useState(centsInput(inv?.amountCents));
+  const [money, setMoney] = useState<Money>(moneyFrom(inv?.amountCents, inv?.originalAmountCents, inv?.originalCurrency, inv?.fxRate));
+  const [supplierId, setSupplierId] = useState(inv?.supplierId || '');
+  const [runId, setRunId] = useState(inv?.runId || '');
+  const { runs } = useBooks();
   const [items, setItems] = useState<ItemDraft[]>(
     inv?.items?.length ? inv.items.map((i) => ({ description: i.description, quantity: String(i.quantity), price: centsInput(i.unitPriceCents) })) : [{ description: '', quantity: '1', price: '' }],
   );
   const parsed: Item[] = items.filter((i) => i.description.trim() || i.price.trim()).map((i) => ({ description: i.description.trim(), quantity: Number(i.quantity), unitPriceCents: toCents(i.price) }));
-  const total = rec ? sum(parsed, (i) => (Number.isFinite(i.quantity) && Number.isFinite(i.unitPriceCents) ? Math.round(i.quantity * i.unitPriceCents) : 0)) : toCents(amount);
+  const total = rec ? sum(parsed, (i) => (Number.isFinite(i.quantity) && Number.isFinite(i.unitPriceCents) ? Math.round(i.quantity * i.unitPriceCents) : 0)) : toCents(money.cad);
+  const pickSupplier = (id: string, name?: string) => { setSupplierId(id); if (id && name && !party.trim()) setParty(name); };
   const setItem = (k: number, patch: Partial<ItemDraft>) => setItems((xs) => xs.map((x, j) => (j === k ? { ...x, ...patch } : x)));
 
   const save = async () => {
@@ -126,7 +131,9 @@ function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; 
       }
     }
     if (!(total > 0)) throw new Error('The total must be above zero.');
-    const body = { kind, party, clientEmail, number, category, line, issueDate, dueDate, notes, items: rec ? parsed : [], amountCents: rec ? undefined : total };
+    const body = rec
+      ? { kind, party, clientEmail, number, category, line, issueDate, dueDate, notes, items: parsed }
+      : { kind, party, number, category, line, issueDate, dueDate, notes, items: [], ...moneyToBody(money), supplierId: supplierId || null, runId: runId || null };
     if (inv) {
       const r = await api<{ invoice: Invoice; paymentLinkReset: boolean; payLinkError: string | null }>(`/invoices/${inv.id}`, { method: 'PATCH', body });
       await reload();
@@ -147,7 +154,14 @@ function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; 
       footerExtra={inv && rec ? <button type="button" className="btn" onClick={voidIt}>Void</button> : undefined}>
       <label>{rec ? 'Client name' : 'Vendor'}<input id="i-party" value={party} onChange={(e) => setParty(e.target.value)} autoFocus /></label>
       {rec ? <label>Client email<input id="i-email" type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="Where Shopify sends the invoice" /></label>
-        : <label>Amount (CAD)<input id="i-amount" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} /></label>}
+        : <SupplierSelect value={supplierId} onChange={pickSupplier} id="i-supplier" />}
+      {!rec && <MoneyInput value={money} onChange={setMoney} date={issueDate} idPrefix="i" label="Amount owed" />}
+      {!rec && (
+        <label>Production run<select id="i-run" value={runId} onChange={(e) => setRunId(e.target.value)}>
+          <option value="">Not part of a run</option>
+          {runs.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select></label>
+      )}
       <label>Invoice number<input id="i-number" value={number} onChange={(e) => setNumber(e.target.value)} placeholder={rec ? `Auto: ${settings?.invoicePrefix || ''}${settings?.nextInvoiceNumber || ''}` : 'Optional'} /></label>
       <label>Category<select id="i-cat" value={category} onChange={(e) => setCategory(e.target.value)}>{cats.map((c) => <option key={c}>{c}</option>)}</select></label>
       <label>Issued<input id="i-issue" type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} /></label>
