@@ -223,3 +223,6 @@ table.edit input, table.edit select { min-height: 32px; padding: 4px 6px; font-s
 .order-h .sub { display: block; font-size: 12.5px; }
 .section-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; }
 .section-h h3 { font-size: 16px; }
+
+.linkish { cursor: pointer; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.linkish:hover { text-decoration-color: var(--ink); }

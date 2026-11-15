@@ -127,7 +127,7 @@ const payDraft = (t: Txn | null, cur: string): PayDraft => ({
   cad: t && cur !== 'CAD' ? centsInput(t.amountCents) : '',
 });
 
-function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
+export function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
   const { txns, invoices, reload } = useBooks();
   const toast = useToast();
   const order = run ? runOrder(run, txns, invoices) : null;

@@ -5,7 +5,10 @@ import TxnTable from '../components/TxnTable';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
 import { dayLabelY, fmt, fmtCur, sum } from '../lib/format';
-import type { Supplier } from '../lib/types';
+import type { Invoice, Run, Supplier, Txn } from '../lib/types';
+import TxnModal from '../components/TxnModal';
+import { RunModal } from './Runs';
+import { InvoiceModal } from './Invoices';
 import { runOrder } from '../lib/derive';
 
 export default function Suppliers() {
@@ -32,7 +35,7 @@ export default function Suppliers() {
         </div>
         {list.length ? (
           <div className="tablewrap"><table>
-            <thead><tr><th>Supplier</th><th className="hide-sm">Contact</th><th className="amt">Paid</th><th className="amt">Owed</th><th className="amt hide-sm">Runs</th><th className="hide-sm">Last paid</th></tr></thead>
+            <thead><tr><th>Supplier</th><th className="hide-sm">Contact</th><th className="amt">Paid</th><th className="amt">Owed</th><th className="amt hide-sm">Runs</th><th className="hide-sm">Last paid</th>{editor && <th />}</tr></thead>
             <tbody>
               {list.map((s) => (
                 <tr key={s.id} className="click" tabIndex={0} onClick={() => setViewing(s)} onKeyDown={(e) => e.key === 'Enter' && setViewing(s)}>
@@ -42,6 +45,7 @@ export default function Suppliers() {
                   <td className={`amt ${s.owedCents ? 'neg' : ''}`}>{s.owedCents ? fmt(s.owedCents) : '—'}</td>
                   <td className="amt hide-sm">{s.runCount || '—'}</td>
                   <td className="hide-sm">{s.lastPaid ? dayLabelY(s.lastPaid) : '—'}</td>
+                  {editor && <td className="actions"><button className="btn small" onClick={(e) => { e.stopPropagation(); setEditing(s); }}>Edit</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -50,45 +54,77 @@ export default function Suppliers() {
         {suppliers.some((s) => s.archived) && <label className="row sub" style={{ gap: 6 }}><input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} style={{ minHeight: 0 }} />Show archived</label>}
       </section>
       {editing && <SupplierModal supplier={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
-      {viewing && <SupplierDetail supplier={suppliers.find((s) => s.id === viewing.id) || viewing} onEdit={editor ? () => { setEditing(viewing); setViewing(null); } : undefined} onClose={() => setViewing(null)} />}
+      {viewing && <SupplierDetail supplier={suppliers.find((s) => s.id === viewing.id) || viewing} editor={editor} onEdit={() => { setEditing(viewing); setViewing(null); }} onClose={() => setViewing(null)} />}
     </>
   );
 }
 
-function SupplierDetail({ supplier: s, onEdit, onClose }: { supplier: Supplier; onEdit?: () => void; onClose: () => void }) {
-  const { txns, invoices, runs } = useBooks();
+function SupplierDetail({ supplier: s, editor, onEdit, onClose }: { supplier: Supplier; editor: boolean; onEdit: () => void; onClose: () => void }) {
+  const { txns, invoices, runs, reload } = useBooks();
+  const toast = useToast();
+  const [txn, setTxn] = useState<Txn | 'new' | null>(null);
+  const [bill, setBill] = useState<Invoice | null>(null);
+  const [run, setRun] = useState<Run | null>(null);
   const payments = txns.filter((t) => t.supplierId === s.id);
   const bills = invoices.filter((i) => i.supplierId === s.id && i.status === 'OPEN');
   const sRuns = runs.filter((r) => r.supplierId === s.id);
+  const payBill = async (b: Invoice) => {
+    try { await api(`/invoices/${b.id}/pay`, { body: {} }); await reload(); toast('Bill marked paid and logged as money out'); }
+    catch (e: any) { toast(e.message); }
+  };
   return (
-    <Modal title={s.name} onClose={onClose} wide footerExtra={onEdit ? <button type="button" className="btn" onClick={onEdit}>Edit supplier</button> : undefined}>
-      <p className="hint full">{[s.contact && `Contact: ${s.contact}`, s.platform, s.email, s.website].filter(Boolean).join(' · ') || 'No contact details yet.'}</p>
-      {s.notes && <p className="full" style={{ margin: 0, whiteSpace: 'pre-line' }}>{s.notes}</p>}
-      <div className="full kv">
-        <div><span>Paid</span><b>{fmt(s.paidCents)}</b></div>
-        <div><span>Owed</span><b className={s.owedCents ? 'neg' : ''}>{fmt(s.owedCents)}</b></div>
-      </div>
-      {bills.length > 0 && (
-        <div className="full"><span className="hint">Open bills</span>
-          <div className="lines" style={{ marginTop: 6 }}>{bills.map((b) => <div key={b.id}><span>{b.notes || b.category} · due {dayLabelY(b.dueDate)}</span><span>{fmt(b.amountCents)}{b.originalCurrency && b.originalAmountCents ? ` (${fmtCur(b.originalAmountCents, b.originalCurrency)})` : ''}</span></div>)}</div>
+    <>
+      <Modal title={s.name} onClose={onClose} wide>
+        <div className="full row" style={{ justifyContent: 'space-between' }}>
+          <span className="hint">{[s.contact && `Contact: ${s.contact}`, s.platform, s.email, s.website].filter(Boolean).join(' · ') || 'No contact details yet.'}</span>
+          {editor && <button type="button" className="btn small" onClick={onEdit}>Edit details</button>}
         </div>
-      )}
-      {sRuns.length > 0 && (
-        <div className="full"><span className="hint">Production runs</span>
-          <div className="lines" style={{ marginTop: 6 }}>
-            {sRuns.map((r) => {
-              const o = runOrder(r, txns, invoices);
-              return (
-                <div key={r.id}><span>{r.name} · {r.units} units</span>
-                  <span className="row" style={{ gap: 8 }}>{o.quote ? fmtCur(o.quote, o.quoteCur) : ''}
-                    {o.status !== 'none' && <span className={`pill ${o.status === 'paid' ? 'good' : o.status === 'deposit' ? 'accent' : 'warn'}`}>{o.status === 'paid' ? 'Paid in full' : o.status === 'deposit' ? `Owes ${o.balance !== null ? fmtCur(o.balance, o.balanceCur) : 'balance'}` : 'Not paid'}</span>}</span></div>
-              );
-            })}
+        {s.notes && <p className="full" style={{ margin: 0, whiteSpace: 'pre-line' }}>{s.notes}</p>}
+        <div className="full kv">
+          <div><span>Paid</span><b>{fmt(s.paidCents)}</b></div>
+          <div><span>Owed</span><b className={s.owedCents ? 'neg' : ''}>{fmt(s.owedCents)}</b></div>
+        </div>
+        {bills.length > 0 && (
+          <div className="full"><span className="hint">Open bills{editor ? ' · click to edit' : ''}</span>
+            <div className="lines" style={{ marginTop: 6 }}>{bills.map((b) => (
+              <div key={b.id}>
+                <span className={editor ? 'linkish' : ''} role={editor ? 'button' : undefined} tabIndex={editor ? 0 : undefined}
+                  onClick={editor ? () => setBill(b) : undefined} onKeyDown={editor ? (e) => e.key === 'Enter' && setBill(b) : undefined}>{b.notes || b.category} · due {dayLabelY(b.dueDate)}</span>
+                <span className="row" style={{ gap: 8 }}>{fmt(b.amountCents)}{b.originalCurrency && b.originalAmountCents ? ` (${fmtCur(b.originalAmountCents, b.originalCurrency)})` : ''}
+                  {editor && <button type="button" className="btn small" onClick={() => payBill(b)}>Mark paid</button>}</span>
+              </div>
+            ))}</div>
           </div>
+        )}
+        {sRuns.length > 0 && (
+          <div className="full"><span className="hint">Production runs{editor ? ' · click to edit the order and payments' : ''}</span>
+            <div className="lines" style={{ marginTop: 6 }}>
+              {sRuns.map((r) => {
+                const o = runOrder(r, txns, invoices);
+                return (
+                  <div key={r.id}>
+                    <span className={editor ? 'linkish' : ''} role={editor ? 'button' : undefined} tabIndex={editor ? 0 : undefined}
+                      onClick={editor ? () => setRun(r) : undefined} onKeyDown={editor ? (e) => e.key === 'Enter' && setRun(r) : undefined}>{r.name} · {r.units} units</span>
+                    <span className="row" style={{ gap: 8 }}>{o.quote ? fmtCur(o.quote, o.quoteCur) : ''}
+                      {o.status !== 'none' && <span className={`pill ${o.status === 'paid' ? 'good' : o.status === 'deposit' ? 'accent' : 'warn'}`}>{o.status === 'paid' ? 'Paid in full' : o.status === 'deposit' ? `Owes ${o.balance !== null ? fmtCur(o.balance, o.balanceCur) : 'balance'}` : 'Not paid'}</span>}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div className="full">
+          <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+            <span className="hint">Payments{editor && payments.length ? ' · click one to edit' : ''}</span>
+            {editor && <button type="button" className="btn small" onClick={() => setTxn('new')}>+ Add payment</button>}
+          </div>
+          {payments.length ? <TxnTable rows={payments} compact onPick={editor ? setTxn : undefined} /> : <div className="empty">No payments recorded yet.</div>}
         </div>
-      )}
-      <div className="full">{payments.length ? <TxnTable rows={payments} compact /> : <div className="empty">No payments recorded yet.</div>}</div>
-    </Modal>
+      </Modal>
+      {txn && <TxnModal txn={txn === 'new' ? null : txn} preset={{ type: 'EXPENSE', supplierId: s.id, party: s.name, category: 'Production & Manufacturing' } as Partial<Txn>} onClose={() => setTxn(null)} />}
+      {bill && <InvoiceModal inv={bill} kind="PAYABLE" onClose={() => setBill(null)} onCreated={() => {}} />}
+      {run && <RunModal run={run} onClose={() => setRun(null)} />}
+    </>
   );
 }
 

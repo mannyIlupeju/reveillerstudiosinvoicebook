@@ -95,7 +95,7 @@ export default function Invoices() {
 
 type ItemDraft = { description: string; quantity: string; price: string };
 
-function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; kind: Invoice['kind']; onClose: () => void; onCreated: (i: Invoice) => void }) {
+export function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; kind: Invoice['kind']; onClose: () => void; onCreated: (i: Invoice) => void }) {
   const { settings, reload } = useBooks();
   const toast = useToast();
   const rec = kind === 'RECEIVABLE';
