@@ -12,6 +12,7 @@ import userRoutes from './routes/users.js';
 import txnRoutes, { receipts, importer } from './routes/txns.js';
 import { runs, budgets, recurring, settings, activity } from './routes/misc.js';
 import invoiceRoutes, { publicInvoices, shopifyWebhook } from './routes/invoices.js';
+import inventoryRoutes from './routes/inventory.js';
 import { runJobs } from './jobs.js';
 
 const app = express();
@@ -25,7 +26,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
-      'img-src': ["'self'", 'data:', 'blob:'],
+      'img-src': ["'self'", 'data:', 'blob:', 'https://cdn.shopify.com'],
       'frame-src': ["'self'"],
       'object-src': ["'self'"],
       'font-src': ["'self'", 'https://fonts.gstatic.com'],
@@ -56,6 +57,7 @@ app.use('/api/runs', runs);
 app.use('/api/budgets', budgets);
 app.use('/api/recurring', recurring);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/inventory', inventoryRoutes);
 app.use('/api/settings', settings);
 app.use('/api/activity', activity);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Not found.')));

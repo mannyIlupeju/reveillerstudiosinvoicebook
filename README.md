@@ -14,7 +14,8 @@ Bookkeeping for Reveiller Studios: expenses and income, production runs with uni
 | Transactions, receipts, CSV export, CSV import | `server/src/routes/txns.js`. Receipts are stored in Postgres (up to 6 MB each, 5 per entry). Imports skip duplicates by content hash. |
 | Production runs, budgets, recurring rules, settings, activity log | `server/src/routes/misc.js` |
 | Invoices, client invoice page, Shopify payments | `server/src/routes/invoices.js`, `server/src/shopify.js` |
-| Scheduled jobs | `server/src/jobs.js`. Every 15 minutes the server logs any recurring charges that have come due and asks Shopify whether open invoices have been paid. Both are safe to run repeatedly. |
+| Inventory | `server/src/inventory.js`, `routes/inventory.js`. Mirrors Shopify product variants and stock. Unit cost, linked production run and low-stock level are set in the app and survive every sync. |
+| Scheduled jobs | `server/src/jobs.js`. Every 15 minutes the server logs any recurring charges that have come due, asks Shopify whether open invoices have been paid, and refreshes inventory. All are safe to run repeatedly. |
 | Database schema | `server/migrations/*.sql`, applied automatically on startup |
 
 Every change is recorded in the activity log (Settings page).
@@ -48,7 +49,7 @@ Optional: add a custom domain such as `books.reveillerstudios.com` under the ser
 The app creates a Shopify **draft order** for each client invoice. Shopify hosts the secure checkout and can email the invoice. When the client pays, the draft order completes and the app marks the invoice paid and logs the income.
 
 1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard) with the account that owns the store, and **create an app** (for example "Reveiller Books").
-2. On the app's version, grant the Admin API scopes `write_draft_orders`, `read_draft_orders` and `read_orders`, then release the version.
+2. On the app's version, grant the Admin API scopes `write_draft_orders`, `read_draft_orders`, `read_orders`, `read_products` and `read_inventory`, then release the version. (The last two power the Inventory page.)
 3. Install the app on your store.
 4. Copy the app's **Client ID** and **Client secret**.
 5. In Render, set these environment variables on the web service, then save (it redeploys):

@@ -45,14 +45,24 @@ async function accessToken() {
 
 export async function shopifyGraphql(query, variables = {}) {
   if (!shopifyConfigured()) throw new Error('Shopify is not connected. Add the Shopify settings to the server environment.');
-  const res = await fetch(`https://${shopDomain()}/admin/api/${API_VERSION}/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await accessToken() },
-    body: JSON.stringify({ query, variables }),
-  });
+  let res;
+  try {
+    res = await fetch(`https://${shopDomain()}/admin/api/${API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await accessToken() },
+      body: JSON.stringify({ query, variables }),
+    });
+  } catch (e) {
+    if (e.message?.startsWith('The Reveiller') || e.message?.startsWith('Shopify')) throw e;
+    throw new Error('Couldn’t reach Shopify. Check SHOPIFY_STORE_DOMAIN, or try again in a minute.');
+  }
   if (!res.ok) throw new Error(`Shopify request failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
   const body = await res.json();
-  if (body.errors?.length) throw new Error(`Shopify error: ${body.errors.map((e) => e.message).join('; ')}`);
+  if (body.errors?.length) {
+    const denied = body.errors.some((e) => e.extensions?.code === 'ACCESS_DENIED' || /access denied/i.test(e.message));
+    if (denied) throw new Error('The Shopify app is missing a permission. In the Dev Dashboard, add the read_products and read_inventory scopes, release a new version, then approve the update in your store.');
+    throw new Error(`Shopify error: ${body.errors.map((e) => e.message).join('; ')}`);
+  }
   return body.data;
 }
 
@@ -119,6 +129,33 @@ export async function draftOrderPaymentStatus(draftOrderId) {
     orderName: d.order?.name || null,
     paidAt: d.order?.processedAt || d.completedAt || null,
   };
+}
+
+// Every product variant with its stock level, paged 100 at a time.
+// Needs the read_products scope (and read_inventory for unit costs).
+export async function fetchAllVariants() {
+  const out = [];
+  let after = null;
+  for (let page = 0; page < 100; page++) {
+    const data = await shopifyGraphql(
+      `query($after: String) {
+        productVariants(first: 100, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id title sku price inventoryQuantity
+            product { id title status productType featuredMedia { preview { image { url } } } }
+            inventoryItem { tracked unitCost { amount } }
+          }
+        }
+      }`,
+      { after },
+    );
+    const conn = data.productVariants;
+    out.push(...conn.nodes);
+    if (!conn.pageInfo.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+  return out;
 }
 
 // Verify a Shopify webhook's HMAC signature against the raw request body.

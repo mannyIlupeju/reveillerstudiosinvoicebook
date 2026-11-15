@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Modal from './Modal';
 import { api } from '../lib/api';
 import { useBooks, useToast } from '../lib/store';
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, centsInput, toCents, today } from '../lib/format';
-import type { Txn } from '../lib/types';
+import type { Receipt, Txn } from '../lib/types';
 
 // Shrink phone photos before upload so receipts stay small in the database.
 async function compress(file: File): Promise<Blob> {
@@ -28,6 +28,63 @@ export async function uploadReceipt(txnId: string, file: File) {
   const name = blob === file ? file.name : file.name.replace(/\.\w+$/, '') + '.jpg';
   fd.append('file', blob, name);
   return api(`/txns/${txnId}/receipts`, { form: fd });
+}
+
+const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf';
+const okType = (f: File) => ACCEPT.split(',').includes(f.type) || /\.(heic|heif)$/i.test(f.name);
+
+// Photo previews with "Take photo" (opens the camera on phones), "Choose file", and drag-and-drop on desktop.
+function ReceiptPicker({ saved, pending, onAdd, onRemovePending, onRemoveSaved }: {
+  saved: Receipt[]; pending: File[]; onAdd: (f: File[]) => void; onRemovePending: (i: number) => void; onRemoveSaved: (id: string) => void;
+}) {
+  const toast = useToast();
+  const [over, setOver] = useState(false);
+  const previews = useMemo(() => pending.map((f) => (f.type.startsWith('image/') && !/hei[cf]/i.test(f.type) ? URL.createObjectURL(f) : '')), [pending]);
+  useEffect(() => () => previews.forEach((u) => u && URL.revokeObjectURL(u)), [previews]);
+  const room = 5 - saved.length - pending.length;
+
+  const take = (list: FileList | null) => {
+    const fs = [...(list || [])];
+    const good = fs.filter(okType);
+    if (good.length < fs.length) toast('Receipts must be photos (JPG, PNG, WebP, HEIC) or PDFs.');
+    if (good.length > room) toast(`You can attach up to 5 receipts per entry.`);
+    if (good.length) onAdd(good.slice(0, room));
+  };
+
+  return (
+    <div className={`full drop ${over ? 'over' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+      onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files); }}>
+      <span className="lbl hint">Receipt photos {room > 0 ? '· drag a file here, or' : '· 5 max'}</span>
+      {(saved.length > 0 || pending.length > 0) && (
+        <div className="thumbs">
+          {saved.map((r) => (
+            <a key={r.id} className="thumb" href={`/api/receipts/${r.id}`} target="_blank" rel="noreferrer" title={r.filename}>
+              {r.mimeType.startsWith('image/') && !/hei[cf]/.test(r.mimeType) ? <img src={`/api/receipts/${r.id}`} alt={r.filename} loading="lazy" /> : <span>{r.mimeType === 'application/pdf' ? 'PDF' : 'Photo'}<br />{r.filename.slice(0, 18)}</span>}
+              <button type="button" aria-label={`Remove ${r.filename}`} onClick={(e) => { e.preventDefault(); onRemoveSaved(r.id); }}>×</button>
+            </a>
+          ))}
+          {pending.map((f, i) => (
+            <div key={i} className="thumb" title={f.name}>
+              {previews[i] ? <img src={previews[i]} alt={f.name} /> : <span>{f.type === 'application/pdf' ? 'PDF' : 'Photo'}<br />{f.name.slice(0, 18)}</span>}
+              <span className="tag">New</span>
+              <button type="button" aria-label={`Remove ${f.name}`} onClick={() => onRemovePending(i)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {room > 0 && (
+        <div className="row">
+          <label className="btn small filebtn">Take photo
+            <input id="t-camera" type="file" accept="image/*" capture="environment" onChange={(e) => { take(e.target.files); e.target.value = ''; }} />
+          </label>
+          <label className="btn small filebtn">Choose photo or PDF
+            <input id="t-file" type="file" accept={`${ACCEPT},image/*`} multiple onChange={(e) => { take(e.target.files); e.target.value = ''; }} />
+          </label>
+        </div>
+      )}
+    </div>
+  );
 }
 
 type Props = { txn?: Txn | null; preset?: Partial<Txn>; onClose: () => void };
@@ -101,26 +158,13 @@ export default function TxnModal({ txn, preset = {}, onClose }: Props) {
           {runs.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select></label>
       )}
-      <div className="full receipts">
-        <span className="lbl">Receipts</span>
-        {receipts.map((r) => (
-          <div key={r.id} className="receipt">
-            <a href={`/api/receipts/${r.id}`} target="_blank" rel="noreferrer">{r.filename}</a>
-            <span className="sub">{Math.round(r.size / 1024)} KB</span>
-            <button type="button" className="btn small danger" onClick={() => removeReceipt(r.id)}>Remove</button>
-          </div>
-        ))}
-        {files.map((f, i) => (
-          <div key={i} className="receipt"><span>{f.name}</span><span className="sub">uploads when you save</span>
-            <button type="button" className="btn small" onClick={() => setFiles((x) => x.filter((_, j) => j !== i))}>Remove</button></div>
-        ))}
-        {receipts.length + files.length < 5 && (
-          <label className="btn small filebtn">
-            + Attach photo or PDF
-            <input id="t-file" type="file" accept="image/*,application/pdf"onChange={(e) => { const f = e.target.files?.[0]; if (f) setFiles((x) => [...x, f]); e.target.value = ''; }} />
-          </label>
-        )}
-      </div>
+      <ReceiptPicker
+        saved={receipts}
+        pending={files}
+        onAdd={(fs) => setFiles((x) => [...x, ...fs].slice(0, 5 - receipts.length))}
+        onRemovePending={(i) => setFiles((x) => x.filter((_, j) => j !== i))}
+        onRemoveSaved={removeReceipt}
+      />
     </Modal>
   );
 }

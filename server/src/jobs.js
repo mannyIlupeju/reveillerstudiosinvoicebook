@@ -1,6 +1,7 @@
 import { q, tx, newId, isUniqueViolation } from './db.js';
 import { today, nextCycle, audit, money } from './util.js';
 import { shopifyConfigured, draftOrderPaymentStatus } from './shopify.js';
+import { syncInventory } from './inventory.js';
 
 // Log every recurring charge that has come due. Safe to run repeatedly and from
 // several processes at once: each charge has a unique recurring_key.
@@ -81,6 +82,7 @@ export async function runJobs() {
   try {
     const r = await runRecurring();
     const p = await syncShopifyInvoices();
+    await syncInventory();
     await q('DELETE FROM sessions WHERE expires_at < now()');
     if (r || p) console.log(`jobs: ${r} recurring logged, ${p} Shopify payments recorded`);
   } catch (e) {

@@ -74,3 +74,23 @@ export type Settings = {
   chargeTax: boolean;
   invoiceFooter: string;
 };
+
+export type InventoryItem = {
+  shopifyVariantId: string;
+  shopifyProductId: string;
+  productTitle: string;
+  variantTitle: string;
+  sku: string;
+  productType: string;
+  productStatus: 'ACTIVE' | 'DRAFT' | 'ARCHIVED' | string;
+  imageUrl: string | null;
+  priceCents: number;
+  quantity: number;
+  tracked: boolean;
+  shopifyUnitCostCents: number | null;
+  unitCostCents: number | null;
+  runId: string | null;
+  lowStockAt: number | null;
+  syncedAt: string;
+};
+export type SyncStatus = { at: string | null; ok: boolean | null; error: string | null; count: number };
