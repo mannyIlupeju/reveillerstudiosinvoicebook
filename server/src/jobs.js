@@ -53,6 +53,11 @@ export async function recordInvoicePayment(inv, { date, source = 'INVOICE', user
         inv.supplierId || null, inv.originalAmountCents || null, inv.originalCurrency || null, inv.originalCurrency ? rate : null, inv.kind === 'PAYABLE' ? inv.runId || null : null],
       c,
     );
+    // Paying a run's bill is that run's final payment, unless one is already recorded.
+    if (inv.kind === 'PAYABLE' && inv.runId) {
+      await q(`UPDATE transactions SET run_payment = 'FINAL' WHERE invoice_id = $1 AND run_payment IS NULL
+               AND NOT EXISTS (SELECT 1 FROM transactions WHERE run_id = $2 AND run_payment = 'FINAL')`, [inv.id, inv.runId], c);
+    }
     await q(
       `UPDATE invoices SET status = 'PAID', paid_date = $2, shopify_order_id = COALESCE($3, shopify_order_id), updated_at = now() WHERE id = $1`,
       [inv.id, paidDate, orderId],

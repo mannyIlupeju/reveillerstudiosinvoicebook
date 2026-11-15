@@ -2,7 +2,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { q, one, tx, newId } from '../db.js';
-import { ah, parse, HttpError, audit, DATE_RE, money } from '../util.js';
+import { ah, parse, HttpError, audit, DATE_RE, money, today } from '../util.js';
+import { CURRENCIES, toCad } from '../fx.js';
 import { requireRole } from '../auth.js';
 import { EXPENSE_CATEGORIES, LINES, FREQUENCIES, RUN_STATUSES, DEFAULT_SETTINGS } from '../constants.js';
 import { runJobs } from '../jobs.js';
@@ -19,7 +20,15 @@ const runBody = z.object({
   retailPriceCents: z.number().int().nonnegative().nullable().optional(),
   wholesalePriceCents: z.number().int().nonnegative().nullable().optional(),
   supplierId: z.string().nullable().optional(),
+  quotedAmountCents: z.number().int().positive().max(1e10).nullable().optional(),
+  quotedCurrency: z.enum(CURRENCIES).default('CAD'),
 });
+// The quote is kept in its own currency; a CAD estimate (today's rate) is stored for unit-cost projections.
+async function quotedCad(b) {
+  if (!b.quotedAmountCents) return null;
+  if (b.quotedCurrency === 'CAD') return b.quotedAmountCents;
+  try { return (await toCad(b.quotedAmountCents, b.quotedCurrency, today())).cadCents; } catch { return null; }
+}
 const SELECT_RUNS = `
   SELECT pr.*, COALESCE((
     SELECT json_agg(json_build_object('id', h.id, 'date', h.date, 'amountCents', h.amount_cents, 'party', h.party,
@@ -80,6 +89,63 @@ runs.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
   res.json({ created: created.length, skipped });
 }));
 
+/* Deposit and final payment on a run's supplier order. Each is a real expense in the books, tagged to the run
+   and its supplier and marked DEPOSIT or FINAL. Recording the final payment settles an open bill linked to the run,
+   so a balance imported as a bill isn't counted twice. */
+const runPayment = z.object({
+  amountCents: z.number().int().positive().max(1e10),
+  currency: z.enum(CURRENCIES).default('CAD'),
+  date: z.string().regex(DATE_RE),
+  cadCents: z.number().int().positive().max(1e10).nullable().optional(),
+});
+runs.put('/:id/payments/:kind', requireRole('EDITOR'), ah(async (req, res) => {
+  const kind = String(req.params.kind).toUpperCase();
+  if (!['DEPOSIT', 'FINAL'].includes(kind)) throw new HttpError(404, 'Unknown payment.');
+  const run = await one('SELECT * FROM production_runs WHERE id = $1', [req.params.id]);
+  if (!run) throw new HttpError(404, 'Run not found.');
+  const b = parse(runPayment, req.body);
+  const supplier = run.supplierId ? await one('SELECT * FROM suppliers WHERE id = $1', [run.supplierId]) : null;
+  let cad = b.cadCents;
+  let rate = null;
+  if (b.currency !== 'CAD') {
+    if (!cad) ({ cadCents: cad, rate } = await toCad(b.amountCents, b.currency, b.date));
+    else rate = Math.round((cad / b.amountCents) * 1e6) / 1e6;
+  } else cad = b.amountCents;
+  const orig = b.currency === 'CAD' ? [null, null, null] : [b.amountCents, b.currency, rate];
+  const label = kind === 'DEPOSIT' ? 'Deposit' : 'Final payment';
+
+  await tx(async (c) => {
+    const existing = await one('SELECT * FROM transactions WHERE run_id = $1 AND run_payment = $2', [run.id, kind], c);
+    if (existing) {
+      await q(`UPDATE transactions SET amount_cents=$2, date=$3, original_amount_cents=$4, original_currency=$5, fx_rate=$6, supplier_id=COALESCE(supplier_id, $7), updated_at=now() WHERE id=$1`,
+        [existing.id, cad, b.date, ...orig, run.supplierId], c);
+      return;
+    }
+    const bill = kind === 'FINAL' ? await one(`SELECT * FROM invoices WHERE run_id = $1 AND kind = 'PAYABLE' AND status = 'OPEN' ORDER BY created_at LIMIT 1`, [run.id], c) : null;
+    const txnId = newId();
+    await q(
+      `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, run_id, supplier_id,
+         original_amount_cents, original_currency, fx_rate, source, run_payment, invoice_id, created_by_id)
+       VALUES ($1,'EXPENSE',$2,$3,$4,'Production & Manufacturing',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [txnId, cad, b.date, supplier?.name || run.name, `${label} · ${run.name}`, run.line, run.id, run.supplierId, ...orig,
+        bill ? 'INVOICE' : 'APP', kind, bill?.id || null, req.user.id],
+      c,
+    );
+    if (bill) {
+      await q(`UPDATE invoices SET status='PAID', paid_date=$2, updated_at=now() WHERE id=$1`, [bill.id, b.date], c);
+    }
+  });
+  await audit(req.user.id, 'update', 'run', run.id, `${label} for “${run.name}”: ${b.currency === 'CAD' ? money(b.amountCents) : `${b.currency} ${(b.amountCents / 100).toFixed(2)} (${money(cad)})`} on ${b.date}`);
+  res.json({ ok: true });
+}));
+runs.delete('/:id/payments/:kind', requireRole('EDITOR'), ah(async (req, res) => {
+  const kind = String(req.params.kind).toUpperCase();
+  const t = await one('DELETE FROM transactions WHERE run_id = $1 AND run_payment = $2 RETURNING *', [req.params.id, kind]);
+  if (t?.invoiceId) await q(`UPDATE invoices SET status='OPEN', paid_date=NULL WHERE id = $1`, [t.invoiceId]);
+  if (t) await audit(req.user.id, 'delete', 'run', req.params.id, `Removed ${kind === 'DEPOSIT' ? 'deposit' : 'final payment'} of ${money(t.amountCents)}${t.invoiceId ? ' (its bill is open again)' : ''}`);
+  res.json({ ok: true });
+}));
+
 runs.delete('/:id/history-costs/:costId', requireRole('EDITOR'), ah(async (req, res) => {
   const k = await one('DELETE FROM run_history_costs WHERE id = $1 AND run_id = $2 RETURNING *', [req.params.costId, req.params.id]);
   if (k) await audit(req.user.id, 'delete', 'run', req.params.id, `Removed a past cost of ${money(k.amountCents)} from a run`);
@@ -88,8 +154,10 @@ runs.delete('/:id/history-costs/:costId', requireRole('EDITOR'), ah(async (req, 
 runs.post('/', requireRole('EDITOR'), ah(async (req, res) => {
   const b = parse(runBody, req.body);
   const run = await one(
-    `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents, supplier_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-    [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null],
+    `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents, supplier_id,
+       quoted_amount_cents, quoted_currency, quoted_cad_cents) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null,
+      b.quotedAmountCents ?? null, b.quotedCurrency, await quotedCad(b)],
   );
   await audit(req.user.id, 'create', 'run', run.id, `Production run “${run.name}” (${run.units} units)`);
   res.status(201).json({ run: { ...run, historyCosts: [] } });
@@ -99,8 +167,11 @@ runs.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
   if (!existing) throw new HttpError(404, 'Run not found.');
   const b = parse(runBody, { ...existing, ...req.body });
   const run = await one(
-    `UPDATE production_runs SET name=$2, line=$3, status=$4, units=$5, date=$6, retail_price_cents=$7, wholesale_price_cents=$8, supplier_id=$9 WHERE id=$1 RETURNING *`,
-    [existing.id, b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null],
+    `UPDATE production_runs SET name=$2, line=$3, status=$4, units=$5, date=$6, retail_price_cents=$7, wholesale_price_cents=$8, supplier_id=$9,
+       quoted_amount_cents=$10, quoted_currency=$11, quoted_cad_cents=$12 WHERE id=$1 RETURNING *`,
+    [existing.id, b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null, b.supplierId || null,
+      b.quotedAmountCents ?? null, b.quotedCurrency,
+      b.quotedAmountCents === existing.quotedAmountCents && b.quotedCurrency === existing.quotedCurrency && existing.quotedCadCents != null ? existing.quotedCadCents : await quotedCad(b)],
   );
   await audit(req.user.id, 'update', 'run', run.id, `Edited run “${run.name}”`);
   res.json({ run: (await one(`${SELECT_RUNS} WHERE pr.id = $1`, [run.id])) });

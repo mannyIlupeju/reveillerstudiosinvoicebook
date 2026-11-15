@@ -78,6 +78,7 @@ const importRow = z.object({
   category: z.enum(EXPENSE_CATEGORIES).default('Production & Manufacturing'),
   payment: z.object({ amountCents: money$, date: z.string().regex(DATE_RE) }).nullable().optional(),
   balance: z.object({ amountCents: money$, dueDate: z.string().regex(DATE_RE).nullable().optional() }).nullable().optional(),
+  quotedCents: money$.nullable().optional(),
   createRun: z.boolean().default(false),
 });
 r.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
@@ -117,9 +118,12 @@ r.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
         const existing = await one('SELECT id FROM production_runs WHERE lower(name) = lower($1)', [row.product], c);
         if (existing) runId = existing.id;
         else {
+          const quoted = row.quotedCents || ((row.payment?.amountCents || 0) + (row.balance?.amountCents || 0)) || null;
+          const quotedCad = quoted ? (row.currency === 'CAD' ? quoted : (await convert(quoted, row.currency, today())).cad) : null;
           runId = (await one(
-            `INSERT INTO production_runs (id, name, line, status, units, date, supplier_id, source) VALUES ($1,$2,$3,$4,$5,$6,$7,'IMPORT') RETURNING id`,
-            [newId(), row.product, line, runStatus, row.quantity, row.payment?.date || today(), s.id], c)).id;
+            `INSERT INTO production_runs (id, name, line, status, units, date, supplier_id, source, quoted_amount_cents, quoted_currency, quoted_cad_cents)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'IMPORT',$8,$9,$10) RETURNING id`,
+            [newId(), row.product, line, runStatus, row.quantity, row.payment?.date || today(), s.id, quoted, row.currency, quotedCad], c)).id;
           out.runs++;
         }
       }
@@ -129,10 +133,12 @@ r.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
         const hash = crypto.createHash('sha256').update(['supplier-import', s.id, row.payment.date, row.payment.amountCents, row.currency, row.product.toLowerCase()].join('|')).digest('hex');
         const ins = await c.query(
           `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, run_id, supplier_id,
-             original_amount_cents, original_currency, fx_rate, source, import_hash, created_by_id)
-           VALUES ($1,'EXPENSE',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'IMPORT',$13,$14) ON CONFLICT (import_hash) DO NOTHING`,
+             original_amount_cents, original_currency, fx_rate, source, import_hash, created_by_id, run_payment)
+           VALUES ($1,'EXPENSE',$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'IMPORT',$13,$14,$15) ON CONFLICT (import_hash) DO NOTHING`,
           [newId(), cad, row.payment.date, s.name, row.category, row.product, line, runId, s.id,
-            row.currency === 'CAD' ? null : row.payment.amountCents, row.currency === 'CAD' ? null : row.currency, row.currency === 'CAD' ? null : rate, hash, req.user.id],
+            row.currency === 'CAD' ? null : row.payment.amountCents, row.currency === 'CAD' ? null : row.currency, row.currency === 'CAD' ? null : rate, hash, req.user.id,
+            // On a run, a payment with a balance still owed is the deposit; one with nothing owed paid it in full.
+            runId && !(await one(`SELECT 1 FROM transactions WHERE run_id = $1 AND run_payment IS NOT NULL`, [runId], c)) ? (row.balance ? 'DEPOSIT' : 'FINAL') : null],
         );
         if (ins.rowCount) out.payments++; else out.skipped.push(`${s.name} payment on ${row.payment.date} (already imported)`);
       }

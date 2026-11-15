@@ -6,6 +6,7 @@ import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
 import { dayLabelY, fmt, fmtCur, sum } from '../lib/format';
 import type { Supplier } from '../lib/types';
+import { runOrder } from '../lib/derive';
 
 export default function Suppliers() {
   const { user } = useAuth();
@@ -72,7 +73,20 @@ function SupplierDetail({ supplier: s, onEdit, onClose }: { supplier: Supplier; 
           <div className="lines" style={{ marginTop: 6 }}>{bills.map((b) => <div key={b.id}><span>{b.notes || b.category} · due {dayLabelY(b.dueDate)}</span><span>{fmt(b.amountCents)}{b.originalCurrency && b.originalAmountCents ? ` (${fmtCur(b.originalAmountCents, b.originalCurrency)})` : ''}</span></div>)}</div>
         </div>
       )}
-      {sRuns.length > 0 && <p className="hint full">Production runs: {sRuns.map((r) => r.name).join(', ')}</p>}
+      {sRuns.length > 0 && (
+        <div className="full"><span className="hint">Production runs</span>
+          <div className="lines" style={{ marginTop: 6 }}>
+            {sRuns.map((r) => {
+              const o = runOrder(r, txns, invoices);
+              return (
+                <div key={r.id}><span>{r.name} · {r.units} units</span>
+                  <span className="row" style={{ gap: 8 }}>{o.quote ? fmtCur(o.quote, o.quoteCur) : ''}
+                    {o.status !== 'none' && <span className={`pill ${o.status === 'paid' ? 'good' : o.status === 'deposit' ? 'accent' : 'warn'}`}>{o.status === 'paid' ? 'Paid in full' : o.status === 'deposit' ? `Owes ${o.balance !== null ? fmtCur(o.balance, o.balanceCur) : 'balance'}` : 'Not paid'}</span>}</span></div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="full">{payments.length ? <TxnTable rows={payments} compact /> : <div className="empty">No payments recorded yet.</div>}</div>
     </Modal>
   );

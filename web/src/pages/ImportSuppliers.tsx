@@ -8,12 +8,13 @@ import { CURRENCIES, EXPENSE_CATEGORIES, LINES, PRODUCTION_CATEGORIES, RUN_STATU
 import { cellText, parseDate } from '../lib/parse';
 
 type Cell = unknown;
-type Field = 'supplier' | 'contact' | 'product' | 'quantity' | 'paid' | 'balance' | 'notes' | 'platform' | 'currency';
+type Field = 'supplier' | 'contact' | 'product' | 'quantity' | 'quoted' | 'paid' | 'balance' | 'notes' | 'platform' | 'currency';
 const FIELDS: { key: Field; label: string; required?: boolean; guess: RegExp[] }[] = [
   { key: 'supplier', label: 'Supplier', required: true, guess: [/^supplier$/i, /supplier|vendor|manufacturer|factory|company/i] },
   { key: 'contact', label: 'Contact person', guess: [/contact|rep|person/i] },
   { key: 'product', label: 'Product', guess: [/^product$/i, /product|item|style/i] },
   { key: 'quantity', label: 'Quantity', guess: [/quantity|qty|units|pieces|moq/i] },
+  { key: 'quoted', label: 'Total quoted', guess: [/quot|total cost|order total/i] },
   { key: 'paid', label: 'Paid so far', guess: [/paid|deposit|payment/i] },
   { key: 'balance', label: 'Balance owed', guess: [/balance|remaining|owed|outstanding|due$/i] },
   { key: 'notes', label: 'Notes', guess: [/notes?|missing|comment/i] },
@@ -58,7 +59,7 @@ function categoryFor(product: string) {
 
 type Row = {
   include: boolean; supplier: string; contact: string; platform: string; notes: string; product: string;
-  quantity: string; currency: string; category: string; paid: string; paidDate: string; balance: string; createRun: boolean;
+  quantity: string; currency: string; category: string; quoted: string; paid: string; paidDate: string; balance: string; createRun: boolean;
 };
 
 export default function ImportSuppliers() {
@@ -127,6 +128,7 @@ export default function ImportSuppliers() {
       return {
         include: true, supplier: get(r, 'supplier'), contact: get(r, 'contact'), platform: get(r, 'platform') || defPlatform, notes: get(r, 'notes'),
         product, quantity: quantity ? String(quantity) : '', currency, category: categoryFor(product),
+        quoted: amountIn(get(r, 'quoted')) ? centsInput(amountIn(get(r, 'quoted'))) : '',
         paid: paid ? centsInput(paid) : '', paidDate, balance: amountIn(balText) ? centsInput(amountIn(balText)) : '',
         createRun: paid > 0 && quantity >= 10 && categoryFor(product) === 'Production & Manufacturing',
       };
@@ -152,6 +154,7 @@ export default function ImportSuppliers() {
           quantity: Number(r.quantity) > 0 ? Math.round(Number(r.quantity)) : null, currency: r.currency, category: r.category,
           payment: toCents(r.paid) > 0 ? { amountCents: toCents(r.paid), date: r.paidDate } : null,
           balance: toCents(r.balance) > 0 ? { amountCents: toCents(r.balance) } : null,
+          quotedCents: toCents(r.quoted) > 0 ? toCents(r.quoted) : null,
           createRun: r.createRun,
         })),
       };
@@ -223,7 +226,8 @@ export default function ImportSuppliers() {
                       <td><select aria-label="Category" value={r.category} onChange={(e) => upd(i, { category: e.target.value })}>
                         {[...PRODUCTION_CATEGORIES, ...EXPENSE_CATEGORIES.filter((c) => !PRODUCTION_CATEGORIES.includes(c))].map((c) => <option key={c}>{c}</option>)}</select></td>
                       <td style={{ whiteSpace: 'nowrap' }}><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={r.createRun} onChange={(e) => upd(i, { createRun: e.target.checked })} style={{ minHeight: 0 }} />Create</label>
-                        {r.createRun && <input aria-label="Quantity" inputMode="numeric" value={r.quantity} onChange={(e) => upd(i, { quantity: e.target.value })} placeholder="Units" style={{ width: 70, marginTop: 4 }} />}</td>
+                        {r.createRun && <input aria-label="Quantity" inputMode="numeric" value={r.quantity} onChange={(e) => upd(i, { quantity: e.target.value })} placeholder="Units" style={{ width: 70, marginTop: 4 }} />}
+                        {r.createRun && <input aria-label="Quote" inputMode="decimal" value={r.quoted} onChange={(e) => upd(i, { quoted: e.target.value })} placeholder="Quote" title="Total quoted" style={{ width: 90, marginTop: 4, display: 'block' }} />}</td>
                     </tr>
                   );
                 })}

@@ -17,6 +17,7 @@ export type Txn = {
   originalAmountCents: number | null;
   originalCurrency: Currency | null;
   fxRate: string | number | null;
+  runPayment: 'DEPOSIT' | 'FINAL' | null;
   source: 'APP' | 'RECURRING' | 'INVOICE' | 'SHOPIFY' | 'IMPORT';
   invoiceId: string | null;
   createdById: string | null;
@@ -37,6 +38,9 @@ export type Run = {
   notes: string;
   source: 'APP' | 'IMPORT';
   supplierId: string | null;
+  quotedAmountCents: number | null;
+  quotedCurrency: string;
+  quotedCadCents: number | null;
   historyCosts: HistoryCost[];
 };
 

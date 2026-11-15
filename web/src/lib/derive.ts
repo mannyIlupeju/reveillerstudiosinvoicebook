@@ -57,3 +57,25 @@ export function alerts(invoices: Invoice[], rules: Rule[], txns: Txn[], limits: 
   const order = { critical: 0, warning: 1, info: 2 };
   return out.sort((a, b) => order[a.sev] - order[b.sev]);
 }
+
+export type OrderStatus = 'none' | 'quoted' | 'deposit' | 'paid';
+/**
+ * A run's supplier order: quote, deposit, final payment and what's left to pay.
+ * Amounts are compared in the quote's currency when the payments use it, otherwise in CAD.
+ */
+export function runOrder(run: Run, txns: Txn[], invoices: Invoice[]) {
+  const deposit = txns.find((t) => t.runId === run.id && t.runPayment === 'DEPOSIT') || null;
+  const final = txns.find((t) => t.runId === run.id && t.runPayment === 'FINAL') || null;
+  const openBill = invoices.find((i) => i.runId === run.id && i.kind === 'PAYABLE' && i.status === 'OPEN') || null;
+  const cur = run.quotedCurrency || 'CAD';
+  const inQuoteCur = (t: Txn | null) => (!t ? 0 : cur === 'CAD' ? (t.originalCurrency ? null : t.amountCents) : t.originalCurrency === cur ? t.originalAmountCents : null);
+  const parts = [inQuoteCur(deposit), inQuoteCur(final)];
+  const sameCur = parts.every((p) => p !== null);
+  const paidQuote = sameCur ? (parts as number[]).reduce((a, b) => a + b, 0) : null;
+  const paidCad = (deposit?.amountCents || 0) + (final?.amountCents || 0);
+  const quote = run.quotedAmountCents;
+  const balance = quote && paidQuote !== null ? Math.max(0, quote - paidQuote) : quote && run.quotedCadCents ? Math.max(0, run.quotedCadCents - paidCad) : null;
+  const balanceCur = quote && paidQuote !== null ? cur : 'CAD';
+  const status: OrderStatus = final || (quote && balance === 0 && paidCad > 0) ? 'paid' : deposit ? 'deposit' : quote ? 'quoted' : 'none';
+  return { deposit, final, openBill, quote, quoteCur: cur, paidCad, balance, balanceCur, status };
+}
