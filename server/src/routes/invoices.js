@@ -73,7 +73,8 @@ r.post('/', requireRole('EDITOR'), ah(async (req, res) => {
     );
   });
   await audit(req.user.id, 'create', 'invoice', inv.id, `${inv.kind === 'RECEIVABLE' ? 'Invoice' : 'Bill'} ${inv.number} ${inv.party} ${money(inv.amountCents)}`);
-  res.status(201).json({ invoice: shape(inv) });
+  const { invoice, payLinkError } = await autoPayLink(inv);
+  res.status(201).json({ invoice: shape(invoice), payLinkError });
 }));
 
 r.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
@@ -93,8 +94,9 @@ r.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
      WHERE id = $1 RETURNING *`,
     [existing.id, b.number, b.party, b.clientEmail, JSON.stringify(b.items), amountCents, b.category, b.line, b.issueDate, b.dueDate, b.notes],
   );
-  await audit(req.user.id, 'update', 'invoice', inv.id, `Edited ${inv.number || 'bill'} ${inv.party}${changed ? ' (payment link reset)' : ''}`);
-  res.json({ invoice: shape(inv), paymentLinkReset: changed });
+  await audit(req.user.id, 'update', 'invoice', inv.id, `Edited ${inv.number || 'bill'} ${inv.party}${changed ? ' (payment link updated)' : ''}`);
+  const { invoice, payLinkError } = await autoPayLink(inv);
+  res.json({ invoice: shape(invoice), paymentLinkReset: changed, payLinkError });
 }));
 
 r.delete('/:id', requireRole('EDITOR'), ah(async (req, res) => {
@@ -139,6 +141,19 @@ async function ensurePayLink(inv) {
     `UPDATE invoices SET shopify_draft_order_id=$2, shopify_invoice_url=$3, public_token=COALESCE(public_token, $4), updated_at=now() WHERE id=$1 RETURNING *`,
     [inv.id, d.id, d.invoiceUrl, newToken()],
   );
+}
+
+// Client invoices get their Shopify payment link as soon as they're saved, so a copied
+// or emailed invoice always has a working Pay now button. A failure doesn't block the save;
+// it's returned so the app can warn, and Send retries it.
+async function autoPayLink(inv) {
+  if (inv.kind !== 'RECEIVABLE' || inv.status !== 'OPEN' || !shopifyConfigured() || inv.shopifyInvoiceUrl) return { invoice: inv, payLinkError: null };
+  try {
+    return { invoice: await ensurePayLink(inv), payLinkError: null };
+  } catch (e) {
+    console.error(`payment link for invoice ${inv.id} failed:`, e.message);
+    return { invoice: inv, payLinkError: e.message };
+  }
 }
 
 r.post('/:id/shopify-link', requireRole('EDITOR'), ah(async (req, res) => {

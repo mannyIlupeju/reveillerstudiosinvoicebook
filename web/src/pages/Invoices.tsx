@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Modal from '../components/Modal';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
@@ -128,13 +128,14 @@ function InvoiceModal({ inv, kind, onClose, onCreated }: { inv: Invoice | null; 
     if (!(total > 0)) throw new Error('The total must be above zero.');
     const body = { kind, party, clientEmail, number, category, line, issueDate, dueDate, notes, items: rec ? parsed : [], amountCents: rec ? undefined : total };
     if (inv) {
-      const r = await api<{ invoice: Invoice; paymentLinkReset: boolean }>(`/invoices/${inv.id}`, { method: 'PATCH', body });
+      const r = await api<{ invoice: Invoice; paymentLinkReset: boolean; payLinkError: string | null }>(`/invoices/${inv.id}`, { method: 'PATCH', body });
       await reload();
-      toast(r.paymentLinkReset ? 'Saved. The amount changed, so create a new Shopify payment link before resending.' : 'Saved');
+      toast(r.payLinkError ? `Saved, but the payment link couldn’t be created: ${r.payLinkError}`
+        : r.paymentLinkReset ? 'Saved. The payment link was updated to the new total. Resend it so your client has the right amount.' : 'Saved');
     } else {
-      const r = await api<{ invoice: Invoice }>('/invoices', { body });
+      const r = await api<{ invoice: Invoice; payLinkError: string | null }>('/invoices', { body });
       await reload();
-      toast(rec ? `Invoice ${r.invoice.number} created` : 'Bill added');
+      toast(r.payLinkError ? `Invoice ${r.invoice.number} created, but the payment link failed: ${r.payLinkError}` : rec ? `Invoice ${r.invoice.number} created with a Shopify payment link` : 'Bill added');
       onCreated(r.invoice);
     }
   };
@@ -187,6 +188,21 @@ function ShareModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
   const [to, setTo] = useState(inv.clientEmail);
   const [message, setMessage] = useState('');
   const publicUrl = inv.publicToken ? `${location.origin}/pay/${inv.publicToken}` : '';
+  const needsLink = inv.status === 'OPEN' && shopify.configured && !inv.payLinkReady;
+  const [linkError, setLinkError] = useState('');
+
+  // Make sure the Pay now link exists before the invoice goes anywhere, e.g. invoices
+  // saved before Shopify was connected, or whose link failed to create on save.
+  const ensureLink = async () => {
+    if (!needsLink) return true;
+    try { await api(`/invoices/${inv.id}/shopify-link`, { body: {} }); await reload(); setLinkError(''); return true; }
+    catch (e: any) { setLinkError(e.message); return false; }
+  };
+  useEffect(() => { if (needsLink && editor) { setBusy('link'); ensureLink().finally(() => setBusy('')); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const shareGuard = async (fn: () => void) => {
+    if (needsLink && !(await ensureLink())) { toast('The Pay now button isn’t ready yet, so the client can’t pay online from this link.'); }
+    fn();
+  };
 
   const act = async (label: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(label);
@@ -203,7 +219,7 @@ function ShareModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
       <div className="full row"><span className={`pill ${PILL[invStatus(inv)]}`}>{invStatus(inv)}</span><span className="sub">{inv.party} · due {dayLabel(inv.dueDate)}{inv.sentAt ? ` · emailed ${new Date(inv.sentAt).toLocaleDateString('en-CA')}` : ''}</span></div>
       {publicUrl && (
         <label className="full">Invoice page for your client
-          <div className="copybox"><input readOnly value={publicUrl} onFocus={(e) => e.target.select()} /><button type="button" className="btn" onClick={() => copy(publicUrl)}>Copy</button><a className="btn" href={publicUrl} target="_blank" rel="noreferrer">Open</a></div>
+          <div className="copybox"><input readOnly value={publicUrl} onFocus={(e) => e.target.select()} /><button type="button" className="btn" onClick={() => shareGuard(() => copy(publicUrl))}>Copy</button><a className="btn" href={publicUrl} target="_blank" rel="noreferrer">Open</a></div>
         </label>
       )}
       {inv.status === 'OPEN' && (!shopify.configured ? (
@@ -212,9 +228,14 @@ function ShareModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
         <>
           <div className="full">
             {inv.payLinkReady ? (
-              <p className="hint">Shopify payment link is ready and shows as Pay now on the invoice page.{inv.shopifyInvoiceUrl && <> <a href={inv.shopifyInvoiceUrl} target="_blank" rel="noreferrer">Open Shopify checkout</a></>}</p>
-            ) : editor && (
-              <button type="button" className="btn" disabled={!!busy} onClick={() => act('link', () => api(`/invoices/${inv.id}/shopify-link`, { body: {} }), 'Payment link created')}>{busy === 'link' ? 'Creating…' : 'Create Shopify payment link'}</button>
+              <p className="hint"><span className="pill good">Pay now ready</span> Clients can pay by card from the invoice page or the email.{inv.shopifyInvoiceUrl && <> <a href={inv.shopifyInvoiceUrl} target="_blank" rel="noreferrer">Preview checkout</a></>}</p>
+            ) : busy === 'link' ? (
+              <p className="hint">Setting up the Shopify payment link…</p>
+            ) : (
+              <div className="banner warn">
+                <span><b>No payment link yet.</b> {linkError || 'Clients won’t see a Pay now button until it’s created.'}</span>
+                {editor && <button type="button" className="btn small" onClick={() => { setBusy('link'); ensureLink().finally(() => setBusy('')); }}>Try again</button>}
+              </div>
             )}
           </div>
           {editor && (
@@ -225,7 +246,7 @@ function ShareModal({ inv, onClose }: { inv: Invoice; onClose: () => void }) {
                 <button type="button" className="btn primary" disabled={!!busy || !to} onClick={() => act('send', () => api(`/invoices/${inv.id}/send`, { body: { to, message } }), `Invoice emailed to ${to}`)}>{busy === 'send' ? 'Sending…' : inv.sentAt ? 'Resend invoice email' : 'Send invoice email'}</button>
                 {inv.payLinkReady && <button type="button" className="btn" disabled={!!busy} onClick={() => act('check', () => api(`/invoices/${inv.id}/check`, { body: {} }), 'Payment status refreshed')}>{busy === 'check' ? 'Checking…' : 'Check payment'}</button>}
               </div>
-              <p className="hint full">Shopify sends the email from your store, with a secure checkout link. Once the client pays, this invoice is marked paid and logged as money in, usually within 15 minutes.</p>
+              <p className="hint full">Shopify sends the email from your store with the Pay now link. Once the client pays, this invoice is marked paid and logged as money in, usually within 15 minutes.</p>
             </>
           )}
         </>
