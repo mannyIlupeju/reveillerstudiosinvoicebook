@@ -1,0 +1,149 @@
+// Production runs, budgets, recurring rules, settings and the activity log.
+import { Router } from 'express';
+import { z } from 'zod';
+import { q, one, tx, newId } from '../db.js';
+import { ah, parse, HttpError, audit, DATE_RE, money } from '../util.js';
+import { requireRole } from '../auth.js';
+import { EXPENSE_CATEGORIES, LINES, FREQUENCIES, RUN_STATUSES, DEFAULT_SETTINGS } from '../constants.js';
+import { runJobs } from '../jobs.js';
+import { shopifyConfigured } from '../shopify.js';
+
+/* ---------- production runs ---------- */
+export const runs = Router();
+const runBody = z.object({
+  name: z.string().trim().min(1).max(150),
+  line: z.enum(LINES).default('RVS'),
+  status: z.enum(RUN_STATUSES).default('Planning'),
+  units: z.number().int().positive().max(1e7),
+  date: z.string().regex(DATE_RE),
+  retailPriceCents: z.number().int().nonnegative().nullable().optional(),
+  wholesalePriceCents: z.number().int().nonnegative().nullable().optional(),
+});
+runs.get('/', ah(async (_req, res) => res.json({ runs: await q('SELECT * FROM production_runs ORDER BY date DESC, created_at DESC') })));
+runs.post('/', requireRole('EDITOR'), ah(async (req, res) => {
+  const b = parse(runBody, req.body);
+  const run = await one(
+    `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+    [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null],
+  );
+  await audit(req.user.id, 'create', 'run', run.id, `Production run “${run.name}” (${run.units} units)`);
+  res.status(201).json({ run });
+}));
+runs.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
+  const existing = await one('SELECT * FROM production_runs WHERE id = $1', [req.params.id]);
+  if (!existing) throw new HttpError(404, 'Run not found.');
+  const b = parse(runBody, { ...existing, ...req.body });
+  const run = await one(
+    `UPDATE production_runs SET name=$2, line=$3, status=$4, units=$5, date=$6, retail_price_cents=$7, wholesale_price_cents=$8 WHERE id=$1 RETURNING *`,
+    [existing.id, b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null],
+  );
+  await audit(req.user.id, 'update', 'run', run.id, `Edited run “${run.name}”`);
+  res.json({ run });
+}));
+runs.delete('/:id', requireRole('EDITOR'), ah(async (req, res) => {
+  const run = await one('DELETE FROM production_runs WHERE id = $1 RETURNING *', [req.params.id]);
+  if (run) await audit(req.user.id, 'delete', 'run', run.id, `Deleted run “${run.name}” (its costs stay in transactions)`);
+  res.json({ ok: true });
+}));
+
+/* ---------- budgets ---------- */
+export const budgets = Router();
+budgets.get('/', ah(async (_req, res) => {
+  const rows = await q('SELECT * FROM budgets');
+  res.json({ limits: Object.fromEntries(rows.map((b) => [b.category, b.limitCents])) });
+}));
+budgets.put('/', requireRole('EDITOR'), ah(async (req, res) => {
+  const { limits } = parse(z.object({ limits: z.record(z.string(), z.number().int().nonnegative().max(1e10)) }), req.body);
+  const entries = Object.entries(limits).filter(([c, v]) => EXPENSE_CATEGORIES.includes(c) && v > 0);
+  await tx(async (c) => {
+    await q('DELETE FROM budgets', [], c);
+    for (const [category, cents] of entries) await q('INSERT INTO budgets (category, limit_cents) VALUES ($1,$2)', [category, cents], c);
+  });
+  await audit(req.user.id, 'update', 'budgets', null, `Budgets updated (${entries.length} categories)`);
+  res.json({ limits: Object.fromEntries(entries) });
+}));
+
+/* ---------- recurring ---------- */
+export const recurring = Router();
+const recBody = z.object({
+  party: z.string().trim().min(1).max(200),
+  amountCents: z.number().int().positive().max(1e10),
+  frequency: z.enum(FREQUENCIES),
+  nextDue: z.string().regex(DATE_RE),
+  category: z.enum(EXPENSE_CATEGORIES),
+  line: z.enum(LINES).default('Shared'),
+  description: z.string().trim().max(300).default(''),
+  active: z.boolean().default(true),
+});
+recurring.get('/', ah(async (_req, res) => res.json({ rules: await q('SELECT * FROM recurring_rules ORDER BY active DESC, next_due') })));
+recurring.post('/', requireRole('EDITOR'), ah(async (req, res) => {
+  const b = parse(recBody, req.body);
+  const rule = await one(
+    `INSERT INTO recurring_rules (id, party, amount_cents, frequency, next_due, day_of_month, category, line, description, active)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+    [newId(), b.party, b.amountCents, b.frequency, b.nextDue, Number(b.nextDue.slice(8)), b.category, b.line, b.description, b.active],
+  );
+  await audit(req.user.id, 'create', 'recurring', rule.id, `Recurring ${rule.party} ${money(rule.amountCents)} ${rule.frequency}`);
+  await runJobs();
+  res.status(201).json({ rule });
+}));
+recurring.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
+  const existing = await one('SELECT * FROM recurring_rules WHERE id = $1', [req.params.id]);
+  if (!existing) throw new HttpError(404, 'Recurring charge not found.');
+  const b = parse(recBody, { ...existing, ...req.body });
+  const dom = b.nextDue !== existing.nextDue ? Number(b.nextDue.slice(8)) : existing.dayOfMonth;
+  const rule = await one(
+    `UPDATE recurring_rules SET party=$2, amount_cents=$3, frequency=$4, next_due=$5, day_of_month=$6, category=$7, line=$8, description=$9, active=$10 WHERE id=$1 RETURNING *`,
+    [existing.id, b.party, b.amountCents, b.frequency, b.nextDue, dom, b.category, b.line, b.description, b.active],
+  );
+  await audit(req.user.id, 'update', 'recurring', rule.id, `${existing.active && !rule.active ? 'Paused' : !existing.active && rule.active ? 'Resumed' : 'Updated'} recurring ${rule.party}`);
+  await runJobs();
+  res.json({ rule: await one('SELECT * FROM recurring_rules WHERE id = $1', [rule.id]) });
+}));
+recurring.delete('/:id', requireRole('EDITOR'), ah(async (req, res) => {
+  const rule = await one('DELETE FROM recurring_rules WHERE id = $1 RETURNING *', [req.params.id]);
+  if (rule) await audit(req.user.id, 'delete', 'recurring', rule.id, `Deleted recurring ${rule.party} (past entries kept)`);
+  res.json({ ok: true });
+}));
+
+/* ---------- settings ---------- */
+export async function getSettings(client) {
+  const row = await one(`SELECT value FROM settings WHERE key = 'business'`, [], client);
+  return { ...DEFAULT_SETTINGS, ...(row?.value || {}) };
+}
+const settingsBody = z.object({
+  businessName: z.string().trim().min(1).max(120),
+  businessEmail: z.string().trim().max(200),
+  businessAddress: z.string().trim().max(400),
+  invoicePrefix: z.string().trim().max(20),
+  nextInvoiceNumber: z.number().int().positive().max(1e9),
+  paymentTermsDays: z.number().int().min(0).max(365),
+  chargeTax: z.boolean(),
+  invoiceFooter: z.string().trim().max(500),
+});
+export const settings = Router();
+settings.get('/', ah(async (_req, res) => {
+  res.json({ settings: await getSettings(), shopify: { configured: shopifyConfigured(), store: process.env.SHOPIFY_STORE_DOMAIN || '' } });
+}));
+settings.put('/', requireRole('OWNER'), ah(async (req, res) => {
+  const body = parse(settingsBody, req.body);
+  await q(`INSERT INTO settings (key, value) VALUES ('business', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [JSON.stringify(body)]);
+  await audit(req.user.id, 'update', 'settings', null, 'Business settings updated');
+  res.json({ settings: body });
+}));
+
+/* ---------- activity ---------- */
+export const activity = Router();
+activity.get('/', ah(async (req, res) => {
+  const limit = Math.min(500, Number(req.query.limit) || 100);
+  const logs = await q(
+    `SELECT a.*, CASE WHEN a.user_id IS NULL THEN 'Automatic' ELSE COALESCE(u.name, 'Former member') END AS user_name
+     FROM audit_log a LEFT JOIN users u ON u.id = a.user_id ORDER BY a.at DESC LIMIT $1`,
+    [limit],
+  );
+  res.json({ logs });
+}));
+activity.post('/run-jobs', requireRole('EDITOR'), ah(async (_req, res) => {
+  await runJobs();
+  res.json({ ok: true });
+}));

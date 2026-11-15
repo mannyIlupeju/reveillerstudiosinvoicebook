@@ -1,0 +1,14 @@
+{
+  "name": "reveiller-books",
+  "private": true,
+  "description": "Bookkeeping for Reveiller Studios: expenses, income, production runs, budgets, recurring charges and Shopify-paid invoices.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm ci --prefix server --omit=dev && npm ci --include=dev --prefix web && npm run build --prefix web",
+    "start": "npm start --prefix server",
+    "dev:server": "npm run dev --prefix server",
+    "dev:web": "npm run dev --prefix web"
+  }
+}
