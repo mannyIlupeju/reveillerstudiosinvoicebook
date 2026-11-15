@@ -76,6 +76,16 @@ export function runOrder(run: Run, txns: Txn[], invoices: Invoice[]) {
   const quote = run.quotedAmountCents;
   const balance = quote && paidQuote !== null ? Math.max(0, quote - paidQuote) : quote && run.quotedCadCents ? Math.max(0, run.quotedCadCents - paidCad) : null;
   const balanceCur = quote && paidQuote !== null ? cur : 'CAD';
-  const status: OrderStatus = final || (quote && balance === 0 && paidCad > 0) ? 'paid' : deposit ? 'deposit' : quote ? 'quoted' : 'none';
-  return { deposit, final, openBill, quote, quoteCur: cur, paidCad, balance, balanceCur, status };
+  let status: OrderStatus = final || (quote && balance === 0 && paidCad > 0) ? 'paid' : deposit ? 'deposit' : quote ? 'quoted' : 'none';
+  // With no quote, an open bill linked to the run is what's owed.
+  let owed = status === 'paid' ? 0 : balance;
+  let owedCur = balanceCur;
+  let owedCad: number | null = owed === null ? null : owedCur === 'CAD' ? owed : run.quotedCadCents && quote ? Math.round((owed * run.quotedCadCents) / quote) : null;
+  if (owed === null && openBill) {
+    owed = openBill.originalAmountCents && openBill.originalCurrency ? openBill.originalAmountCents : openBill.amountCents;
+    owedCur = openBill.originalCurrency || 'CAD';
+    owedCad = openBill.amountCents;
+    if (status === 'none') status = 'deposit';
+  }
+  return { deposit, final, openBill, quote, quoteCur: cur, paidCad, balance, balanceCur, status, owed, owedCur, owedCad };
 }

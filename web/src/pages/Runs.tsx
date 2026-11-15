@@ -4,7 +4,7 @@ import Modal from '../components/Modal';
 import TxnModal from '../components/TxnModal';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
-import { CURRENCIES, LINES, RUN_STATUSES, centsInput, dayLabelY, fmt, fmtCur, toCents, today } from '../lib/format';
+import { CURRENCIES, LINES, RUN_STATUSES, centsInput, dayLabelY, fmt, fmtCur, sum, toCents, today } from '../lib/format';
 import { runOrder, runStats, type OrderStatus } from '../lib/derive';
 import { SupplierSelect } from '../components/SupplierFields';
 import type { Run, Txn } from '../lib/types';
@@ -24,6 +24,10 @@ export default function Runs() {
   const editor = canEdit(user);
   const usedSuppliers = suppliers.filter((s) => runs.some((r) => r.supplierId === s.id));
 
+  const orders = runs.map((r) => runOrder(r, txns, invoices));
+  const owing = orders.filter((o) => o.owed && o.owed > 0);
+  const owingCad = sum(owing, (o) => o.owedCad || 0);
+  const unknownCad = owing.some((o) => o.owedCad === null);
   const shown = runs.filter((r) => (supplierFilter === 'all' || (supplierFilter === 'none' ? !r.supplierId : r.supplierId === supplierFilter))
     && (payFilter === 'all' || ['quoted', 'deposit'].includes(runOrder(r, txns, invoices).status)));
 
@@ -48,6 +52,14 @@ export default function Runs() {
           </div>
         )}
       </section>
+      {runs.length > 0 && (
+        <section className="tiles">
+          <div className="tile"><span className="k">Owed to suppliers</span><span className={`v ${owingCad ? 'neg' : ''}`}>{fmt(owingCad)}{unknownCad ? '+' : ''}</span>
+            <span className="s">{owing.length ? `On ${owing.length} run${owing.length === 1 ? '' : 's'}, in CAD (est.)` : 'All runs paid up'}</span></div>
+          <div className="tile"><span className="k">Paid on run orders</span><span className="v">{fmt(sum(orders, (o) => o.paidCad))}</span><span className="s">Deposits and final payments</span></div>
+          <div className="tile"><span className="k">Runs</span><span className="v">{runs.length}</span><span className="s">{orders.filter((o) => o.status === 'paid').length} paid in full · {owing.length} owing</span></div>
+        </section>
+      )}
       {!runs.length ? (
         <div className="welcome"><h2>No production runs yet</h2><p>Create a run for each drop or style batch, for example “RVS Drop 03 hoodies, 60 units”. Then add the supplier’s quote and payments, and tag other costs like labels and freight, to see your real unit cost and margin.</p>
           {editor && <div className="row"><Link className="btn" to="/production/import">Import past runs from a spreadsheet</Link></div>}</div>
@@ -73,6 +85,18 @@ export default function Runs() {
                     <span className={`pill ${r.status === 'Selling' ? 'good' : r.status === 'In production' ? 'accent' : ''}`}>{r.status}</span></div>
                 </div>
 
+                {o.owed !== null && o.owed > 0 ? (
+                  <div className="owing due">
+                    <span className="k">Owing{supplier ? ` to ${supplier.name}` : ''}</span>
+                    <b>{fmtCur(o.owed, o.owedCur)}</b>
+                    <span className="s">{[o.owedCur !== 'CAD' && o.owedCad ? `≈ ${fmt(o.owedCad)} CAD` : '', o.deposit ? `deposit paid ${dayLabelY(o.deposit.date)}` : 'nothing paid yet', o.openBill ? `bill due ${dayLabelY(o.openBill.dueDate)}` : ''].filter(Boolean).join(' · ')}</span>
+                  </div>
+                ) : o.status === 'paid' ? (
+                  <div className="owing clear"><span className="k">Paid in full</span><b>{fmt(o.paidCad)}</b><span className="s">{o.final ? `final payment ${dayLabelY(o.final.date)}` : 'nothing owing'}</span></div>
+                ) : (o.deposit || supplier) && !o.quote ? (
+                  <div className="owing unknown"><span className="k">Amount owing unknown</span><span className="s">Add the bulk quote in Edit run & payments to track the balance.</span></div>
+                ) : null}
+
                 {(supplier || o.quote || o.deposit || o.final) && (
                   <div className="order">
                     <div className="order-h">
@@ -83,7 +107,6 @@ export default function Runs() {
                       <div><span>Bulk quote</span><span>{o.quote ? fmtCur(o.quote, o.quoteCur) : '—'}</span></div>
                       <div><span>Deposit{o.deposit && ` · ${dayLabelY(o.deposit.date)}`}</span><span>{o.deposit ? paidAs(o.deposit) : '—'}</span></div>
                       <div><span>Final payment{o.final && ` · ${dayLabelY(o.final.date)}`}</span><span>{o.final ? paidAs(o.final) : '—'}</span></div>
-                      {o.balance !== null && o.status !== 'paid' && <div><b>Balance owed</b><b className="neg">{fmtCur(o.balance, o.balanceCur)}</b></div>}
                     </div>
                   </div>
                 )}
