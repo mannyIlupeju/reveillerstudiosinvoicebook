@@ -20,12 +20,14 @@ export function invStatus(i: Invoice): 'paid' | 'void' | 'overdue' | 'open' {
 export const isOpen = (i: Invoice) => i.status === 'OPEN';
 export const monthlyEquiv = (r: Rule) => ({ weekly: (r.amountCents * 52) / 12, monthly: r.amountCents, quarterly: r.amountCents / 3, yearly: r.amountCents / 12 }[r.frequency] ?? r.amountCents);
 
+// A run's cost = expenses in the books tagged to it + past costs recorded on the run only.
 export function runStats(run: Run, txns: Txn[]) {
   const costs = txns.filter((t) => t.type === 'EXPENSE' && t.runId === run.id);
-  const total = sum(costs, (t) => t.amountCents);
+  const history = run.historyCosts || [];
+  const total = sum(costs, (t) => t.amountCents) + sum(history, (h) => h.amountCents);
   const unit = run.units ? total / run.units : 0;
   const m = (price: number | null) => (price && run.units ? (price - unit) / price : null);
-  return { costs, total, unit, marginRetail: m(run.retailPriceCents), marginWholesale: m(run.wholesalePriceCents) };
+  return { costs, history, total, unit, marginRetail: m(run.retailPriceCents), marginWholesale: m(run.wholesalePriceCents) };
 }
 
 export type Alert = { sev: 'critical' | 'warning' | 'info'; text: string; to: string };

@@ -14,6 +14,7 @@ import Recurring from './pages/Recurring';
 import Invoices from './pages/Invoices';
 import Inventory from './pages/Inventory';
 import ImportCsv from './pages/ImportCsv';
+import ImportRuns from './pages/ImportRuns';
 import Team from './pages/Team';
 import SettingsPage from './pages/Settings';
 
@@ -69,6 +70,7 @@ function Shell() {
             <Route path="/invoices" element={<Invoices />} />
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/production" element={<Runs />} />
+            <Route path="/production/import" element={editor ? <ImportRuns /> : <Navigate to="/production" />} />
             <Route path="/budgets" element={<Budgets />} />
             <Route path="/recurring" element={<Recurring />} />
             <Route path="/import" element={editor ? <ImportCsv /> : <Navigate to="/" />} />

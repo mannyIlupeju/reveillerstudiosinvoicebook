@@ -1,9 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import Modal from '../components/Modal';
 import TxnModal from '../components/TxnModal';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
-import { LINES, RUN_STATUSES, centsInput, dayLabel, fmt, toCents, today } from '../lib/format';
+import { LINES, RUN_STATUSES, centsInput, dayLabelY, fmt, toCents, today } from '../lib/format';
 import { runStats } from '../lib/derive';
 import type { Run, Txn } from '../lib/types';
 
@@ -20,12 +21,13 @@ export default function Runs() {
     <>
       <section className="panel">
         <div className="panel-h">
-          <div><h2>Production runs</h2><p>Each run’s cost is the total of the expenses tagged to it. Unit cost is that total divided by units produced.</p></div>
-          {editor && <button className="btn primary" onClick={() => setEditing('new')}>+ New run</button>}
+          <div><h2>Production runs</h2><p>Each run’s cost is the expenses tagged to it plus any past costs imported onto it (marked “past”). Unit cost is that total divided by units produced.</p></div>
+          {editor && <div className="row"><Link className="btn" to="/production/import">Import spreadsheet</Link><button className="btn primary" onClick={() => setEditing('new')}>+ New run</button></div>}
         </div>
       </section>
       {!runs.length ? (
-        <div className="welcome"><h2>No production runs yet</h2><p>Create a run for each drop or style batch, for example “RVS Drop 03 hoodies, 60 units”. Then tag the blanks, printing, labels and freight to it to see your real unit cost and margin.</p></div>
+        <div className="welcome"><h2>No production runs yet</h2><p>Create a run for each drop or style batch, for example “RVS Drop 03 hoodies, 60 units”. Then tag the blanks, printing, labels and freight to it to see your real unit cost and margin.</p>
+          {editor && <div className="row"><Link className="btn" to="/production/import">Import past runs from a spreadsheet</Link></div>}</div>
       ) : (
         <section className="runs">
           {runs.map((r) => {
@@ -34,7 +36,7 @@ export default function Runs() {
               <article className="run" key={r.id}>
                 <div>
                   <h3>{r.name}</h3>
-                  <div className="meta"><span className="chip">{r.line}</span><span>{dayLabel(r.date)}</span><span>{r.units} units</span>
+                  <div className="meta"><span className="chip">{r.line}</span><span>{dayLabelY(r.date)}</span><span>{r.units} units</span>
                     <span className={`pill ${r.status === 'Selling' ? 'good' : r.status === 'In production' ? 'accent' : ''}`}>{r.status}</span></div>
                 </div>
                 <div className="kv">
@@ -43,12 +45,19 @@ export default function Runs() {
                   <div><span>Retail {r.retailPriceCents ? fmt(r.retailPriceCents) : ''}</span><b className={s.marginRetail !== null && s.marginRetail < 0.5 ? 'neg' : ''}>{pct(s.marginRetail)} margin</b></div>
                   <div><span>Wholesale {r.wholesalePriceCents ? fmt(r.wholesalePriceCents) : ''}</span><b>{pct(s.marginWholesale)} margin</b></div>
                 </div>
-                {s.costs.length ? (
-                  <div className="lines">
-                    {s.costs.slice(0, 6).map((t) => <div key={t.id}><span>{t.party || t.category}{t.description ? ` · ${t.description}` : ''}</span><span>{fmt(t.amountCents)}</span></div>)}
-                    {s.costs.length > 6 && <div className="sub">+{s.costs.length - 6} more</div>}
-                  </div>
-                ) : <p className="sub" style={{ margin: 0 }}>No costs tagged yet.</p>}
+                {s.costs.length + s.history.length ? (() => {
+                  const lines = [
+                    ...s.history.map((h) => ({ id: h.id, label: h.party || h.description || h.category, note: h.party ? h.description : '', cents: h.amountCents, past: true })),
+                    ...s.costs.map((t) => ({ id: t.id, label: t.party || t.category, note: t.description, cents: t.amountCents, past: false })),
+                  ];
+                  return (
+                    <div className="lines">
+                      {lines.slice(0, 6).map((l) => <div key={l.id}><span>{l.label}{l.note ? ` · ${l.note}` : ''}{l.past && <span className="chip" title="Recorded on the run only, not in your books">past</span>}</span><span>{fmt(l.cents)}</span></div>)}
+                      {lines.length > 6 && <div className="sub">+{lines.length - 6} more</div>}
+                    </div>
+                  );
+                })() : <p className="sub" style={{ margin: 0 }}>No costs tagged yet.</p>}
+                {r.notes && <p className="sub" style={{ margin: 0 }}>{r.notes}</p>}
                 {editor && <div className="row"><button className="btn small" onClick={() => setCostFor(r)}>+ Add cost</button><button className="btn small" onClick={() => setEditing(r)}>Edit run</button></div>}
               </article>
             );
@@ -85,6 +94,10 @@ function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
     toast(run ? 'Run updated' : 'Run created');
   };
   const remove = async () => { await api(`/runs/${run!.id}`, { method: 'DELETE' }); await reload(); toast('Run deleted'); };
+  const removeHistory = async (costId: string) => {
+    try { await api(`/runs/${run!.id}/history-costs/${costId}`, { method: 'DELETE' }); await reload(); toast('Past cost removed'); }
+    catch (e: any) { toast(e.message); }
+  };
 
   return (
     <Modal title={run ? 'Edit production run' : 'New production run'} onClose={onClose} onSubmit={save} onDelete={run ? remove : undefined}>
@@ -95,7 +108,18 @@ function RunModal({ run, onClose }: { run: Run | null; onClose: () => void }) {
       <label>Start date<input id="r-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
       <label>Retail price<input id="r-retail" inputMode="decimal" value={retail} onChange={(e) => setRetail(e.target.value)} placeholder="Optional" /></label>
       <label>Wholesale price<input id="r-wholesale" inputMode="decimal" value={wholesale} onChange={(e) => setWholesale(e.target.value)} placeholder="Optional" /></label>
-      {run && <p className="hint full">Deleting a run keeps its cost entries; they just stop being tagged to it.</p>}
+      {run && run.historyCosts.length > 0 && (
+        <div className="full">
+          <span className="hint">Past costs recorded on this run only (not in your books)</span>
+          <div className="lines" style={{ marginTop: 6 }}>
+            {run.historyCosts.map((h) => (
+              <div key={h.id}><span>{[h.party, h.description].filter(Boolean).join(' · ') || h.category}{h.date ? ` · ${h.date}` : ''}</span>
+                <span className="row" style={{ gap: 6 }}>{fmt(h.amountCents)}<button type="button" className="btn small" aria-label="Remove past cost" onClick={() => removeHistory(h.id)}>×</button></span></div>
+            ))}
+          </div>
+        </div>
+      )}
+      {run && <p className="hint full">Deleting a run keeps its book entries; they just stop being tagged to it. Past costs recorded on the run are deleted with it.</p>}
     </Modal>
   );
 }

@@ -3,7 +3,8 @@ import Papa from 'papaparse';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useBooks, useToast } from '../lib/store';
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, dayLabel, fmt, iso } from '../lib/format';
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, LINES, dayLabel, fmt } from '../lib/format';
+import { parseDate, parseMoney } from '../lib/parse';
 
 type Row = Record<string, string>;
 type Mapping = { date: string; desc: string; party: string; amount: string; debit: string; credit: string; mode: 'signed' | 'split' };
@@ -23,22 +24,7 @@ function guess(headers: string[]): Mapping {
   };
 }
 
-function parseDate(s: string): string | null {
-  const t = (s || '').trim();
-  let m = t.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  m = t.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/); // assume MM/DD/YYYY
-  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
-  const d = new Date(t);
-  return Number.isNaN(d.getTime()) ? null : iso(d);
-}
-const money = (s: string) => {
-  const t = (s || '').trim();
-  if (!t) return NaN;
-  const neg = /^\(.*\)$/.test(t) || t.startsWith('-');
-  const n = parseFloat(t.replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? Math.round(n * 100) * (neg ? -1 : 1) : NaN;
-};
+const money = (s: string) => parseMoney(s);
 
 // Keyword rules for a first-pass category. Everything can be changed after import.
 const RULES: [RegExp, string, 'EXPENSE' | 'INCOME'][] = [

@@ -44,6 +44,8 @@ export const monthLabel = (ym: string, short = false) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-CA', short ? { month: 'short' } : { month: 'long', year: 'numeric' });
 };
 export const dayLabel = (s?: string | null) => (s ? parseD(s).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' }) : '');
+/** "Mar 1" this year, "Mar 1, 2025" otherwise. */
+export const dayLabelY = (s?: string | null) => (s ? parseD(s).toLocaleDateString('en-CA', s.slice(0, 4) === String(new Date().getFullYear()) ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }) : '');
 export const longDate = (s?: string | null) => (s ? parseD(s).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' }) : '');
 export const daysBetween = (a: string, b: string) => Math.round((parseD(b).getTime() - parseD(a).getTime()) / 864e5);
 export const sum = <T,>(arr: T[], f: (x: T) => number) => arr.reduce((a, x) => a + (f(x) || 0), 0);

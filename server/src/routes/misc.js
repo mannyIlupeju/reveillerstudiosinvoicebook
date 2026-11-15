@@ -19,7 +19,71 @@ const runBody = z.object({
   retailPriceCents: z.number().int().nonnegative().nullable().optional(),
   wholesalePriceCents: z.number().int().nonnegative().nullable().optional(),
 });
-runs.get('/', ah(async (_req, res) => res.json({ runs: await q('SELECT * FROM production_runs ORDER BY date DESC, created_at DESC') })));
+const SELECT_RUNS = `
+  SELECT pr.*, COALESCE((
+    SELECT json_agg(json_build_object('id', h.id, 'date', h.date, 'amountCents', h.amount_cents, 'party', h.party,
+      'description', h.description, 'category', h.category) ORDER BY h.date NULLS FIRST, h.created_at)
+    FROM run_history_costs h WHERE h.run_id = pr.id), '[]') AS history_costs
+  FROM production_runs pr`;
+runs.get('/', ah(async (_req, res) => res.json({ runs: await q(`${SELECT_RUNS} ORDER BY pr.date DESC, pr.created_at DESC`) })));
+
+// Import past and in-progress runs from a spreadsheet. The browser groups rows into runs;
+// each cost line is either recorded on the run only ("history") or added to the books as an
+// expense tagged to the run ("books"). Runs whose name already exists are skipped.
+const importCost = z.object({
+  date: z.string().regex(DATE_RE).nullable().optional(),
+  amountCents: z.number().int().positive().max(1e10),
+  party: z.string().trim().max(200).default(''),
+  description: z.string().trim().max(500).default(''),
+  category: z.enum(EXPENSE_CATEGORIES).default('Production & Manufacturing'),
+});
+const importRun = runBody.extend({
+  notes: z.string().trim().max(2000).default(''),
+  costs: z.array(importCost).max(500).default([]),
+});
+runs.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
+  const { runs: list, costMode } = parse(z.object({ runs: z.array(importRun).min(1).max(500), costMode: z.enum(['history', 'books']) }), req.body);
+  const existing = new Set((await q('SELECT lower(name) AS n FROM production_runs')).map((r) => r.n));
+  const created = [];
+  const skipped = [];
+  await tx(async (c) => {
+    for (const r of list) {
+      if (existing.has(r.name.toLowerCase())) { skipped.push(r.name); continue; }
+      existing.add(r.name.toLowerCase());
+      const run = await one(
+        `INSERT INTO production_runs (id, name, line, status, units, date, retail_price_cents, wholesale_price_cents, notes, source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'IMPORT') RETURNING id`,
+        [newId(), r.name, r.line, r.status, r.units, r.date, r.retailPriceCents ?? null, r.wholesalePriceCents ?? null, r.notes],
+        c,
+      );
+      for (const k of r.costs) {
+        if (costMode === 'books') {
+          await q(
+            `INSERT INTO transactions (id, type, amount_cents, date, party, category, description, line, run_id, source, created_by_id)
+             VALUES ($1,'EXPENSE',$2,$3,$4,$5,$6,$7,$8,'IMPORT',$9)`,
+            [newId(), k.amountCents, k.date || r.date, k.party, k.category, k.description, r.line, run.id, req.user.id],
+            c,
+          );
+        } else {
+          await q(
+            `INSERT INTO run_history_costs (id, run_id, date, amount_cents, party, description, category) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [newId(), run.id, k.date || null, k.amountCents, k.party, k.description, k.category],
+            c,
+          );
+        }
+      }
+      created.push(r.name);
+    }
+  });
+  if (created.length) await audit(req.user.id, 'import', 'run', null, `Imported ${created.length} production run(s) from a spreadsheet (${costMode === 'books' ? 'costs added to the books' : 'costs kept on the runs only'})`);
+  res.json({ created: created.length, skipped });
+}));
+
+runs.delete('/:id/history-costs/:costId', requireRole('EDITOR'), ah(async (req, res) => {
+  const k = await one('DELETE FROM run_history_costs WHERE id = $1 AND run_id = $2 RETURNING *', [req.params.costId, req.params.id]);
+  if (k) await audit(req.user.id, 'delete', 'run', req.params.id, `Removed a past cost of ${money(k.amountCents)} from a run`);
+  res.json({ ok: true });
+}));
 runs.post('/', requireRole('EDITOR'), ah(async (req, res) => {
   const b = parse(runBody, req.body);
   const run = await one(
@@ -27,7 +91,7 @@ runs.post('/', requireRole('EDITOR'), ah(async (req, res) => {
     [newId(), b.name, b.line, b.status, b.units, b.date, b.retailPriceCents ?? null, b.wholesalePriceCents ?? null],
   );
   await audit(req.user.id, 'create', 'run', run.id, `Production run “${run.name}” (${run.units} units)`);
-  res.status(201).json({ run });
+  res.status(201).json({ run: { ...run, historyCosts: [] } });
 }));
 runs.patch('/:id', requireRole('EDITOR'), ah(async (req, res) => {
   const existing = await one('SELECT * FROM production_runs WHERE id = $1', [req.params.id]);

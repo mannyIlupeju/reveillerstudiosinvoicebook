@@ -19,6 +19,7 @@ export type Txn = {
   receipts: Receipt[];
 };
 
+export type HistoryCost = { id: string; date: string | null; amountCents: number; party: string; description: string; category: string };
 export type Run = {
   id: string;
   name: string;
@@ -28,6 +29,9 @@ export type Run = {
   date: string;
   retailPriceCents: number | null;
   wholesalePriceCents: number | null;
+  notes: string;
+  source: 'APP' | 'IMPORT';
+  historyCosts: HistoryCost[];
 };
 
 export type Rule = {
