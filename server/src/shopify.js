@@ -28,7 +28,16 @@ async function accessToken() {
       client_secret: process.env.SHOPIFY_CLIENT_SECRET,
     }),
   });
-  if (!res.ok) throw new Error(`Shopify token request failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const body = await res.text();
+    const code = body.match(/Oauth error (\w+)/i)?.[1] || '';
+    const hints = {
+      app_not_installed: 'The Reveiller Books app isn’t installed on your store yet. Install it from the Shopify Dev Dashboard, then try again.',
+      shop_not_permitted: 'This store isn’t in the same Shopify organization as the app. Create the app from the Dev Dashboard of the account that owns the store.',
+      invalid_client: 'Shopify didn’t accept the client ID or secret. Check SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET on the server.',
+    };
+    throw new Error(hints[code] || `Shopify sign-in failed (${res.status}${code ? `: ${code}` : ''}).`);
+  }
   const { access_token, expires_in } = await res.json();
   cached = { token: access_token, expiresAt: Date.now() + (expires_in || 86399) * 1000 };
   return access_token;
