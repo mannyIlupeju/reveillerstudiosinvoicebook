@@ -19,6 +19,8 @@ import Suppliers from './pages/Suppliers';
 import ImportSuppliers from './pages/ImportSuppliers';
 import Team from './pages/Team';
 import SettingsPage from './pages/Settings';
+import Orders from './pages/Orders';
+import { OrderSummaryProvider, useOrderSummary } from './lib/orders';
 
 const MonthCtx = createContext<[string, (m: string) => void]>(null!);
 export const useMonth = () => useContext(MonthCtx);
@@ -32,7 +34,7 @@ export default function App() {
   if (loc.pathname.startsWith('/invite/')) return <Routes><Route path="/invite/:token" element={<AcceptInvite />} /></Routes>;
   if (!ready) return <div className="center muted">Loading…</div>;
   if (!user) return <Login />;
-  return <BooksProvider><Shell /></BooksProvider>;
+  return <BooksProvider><OrderSummaryProvider><Shell /></OrderSummaryProvider></BooksProvider>;
 }
 
 const ROLE_LABEL = { OWNER: 'Owner', EDITOR: 'Editor', VIEWER: 'Viewer' } as const;
@@ -47,10 +49,13 @@ function Shell() {
   const [adding, setAdding] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
   const editor = canEdit(user);
+  const { summary } = useOrderSummary();
+  const badges: Record<string, number> = { '/orders': summary?.count || 0 };
 
   const groups: { label: string; links: [string, string][] }[] = [
     { label: 'Books', links: [['/', 'Dashboard'], ['/transactions', 'Transactions'], ['/invoices', 'Invoices'], ['/budgets', 'Budgets'], ['/recurring', 'Recurring']] },
-    { label: 'Production', links: [['/production', 'Production runs'], ['/suppliers', 'Suppliers'], ['/inventory', 'Inventory']] },
+    { label: 'Shop', links: [['/orders', 'Orders'], ['/inventory', 'Inventory']] },
+    { label: 'Production', links: [['/production', 'Production runs'], ['/suppliers', 'Suppliers']] },
     {
       label: 'Studio',
       links: [...(editor ? [['/import', 'Import'] as [string, string]] : []), ...(user?.role === 'OWNER' ? [['/team', 'Team'] as [string, string]] : []), ['/settings', 'Settings']],
@@ -72,7 +77,12 @@ function Shell() {
             {groups.map((g) => (
               <div key={g.label} className="navgroup">
                 <span className="navlabel">{g.label}</span>
-                {g.links.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'}>{label}</NavLink>)}
+                {g.links.map(([to, label]) => (
+                  <NavLink key={to} to={to} end={to === '/'}>
+                    {label}
+                    {badges[to] > 0 && <span className="navcount" aria-label={`${badges[to]} waiting`}>{badges[to]}</span>}
+                  </NavLink>
+                ))}
               </div>
             ))}
           </nav>
@@ -103,6 +113,7 @@ function Shell() {
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/invoices" element={<Invoices />} />
                 <Route path="/inventory" element={<Inventory />} />
+                <Route path="/orders" element={<Orders />} />
                 <Route path="/production" element={<Runs />} />
                 <Route path="/suppliers" element={<Suppliers />} />
                 <Route path="/suppliers/import" element={editor ? <ImportSuppliers /> : <Navigate to="/suppliers" />} />

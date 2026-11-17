@@ -51,6 +51,7 @@ The app creates a Shopify **draft order** for each client invoice. Shopify hosts
 
 1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard) with the account that owns the store, and **create an app** (for example "Reveillerstudios CRM").
 2. On the app's version, grant the Admin API scopes `write_draft_orders`, `read_draft_orders`, `read_orders`, `read_products` and `read_inventory`, then release the version. (The last two power the Inventory page.)
+   `read_orders` also powers the Orders page. To show customer names and shipping addresses there, enable protected customer data access (name, address, email, phone) for the app in the Dev Dashboard; without it the page still works and links to each order in Shopify.
 3. Install the app on your store.
 4. Copy the app's **Client ID** and **Client secret**.
 5. In Render, set these environment variables on the web service, then save (it redeploys):

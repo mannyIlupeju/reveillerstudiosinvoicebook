@@ -118,3 +118,24 @@ export type Supplier = {
   id: string; name: string; contact: string; platform: string; email: string; website: string; notes: string; archived: boolean;
   paidCents: number; paymentCount: number; owedCents: number; runCount: number; lastPaid: string | null;
 };
+
+export type OrderStage = 'TODO' | 'PACKING' | 'PACKED';
+export type ShopOrder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  financialStatus: string;
+  fulfillmentStatus: string;
+  note: string;
+  tags: string[];
+  itemCount: number;
+  totalCents: number;
+  currency: string;
+  shipping: string | null;
+  items: { id: string; title: string; variant: string; sku: string; quantity: number; unfulfilled: number; image: string | null }[];
+  tracking: { number: string | null; company: string | null; url: string | null; at: string }[];
+  customer: { email: string; name: string; address: string[]; phone: string } | null;
+  adminUrl: string | null;
+  task: { stage: OrderStage; assignedTo: string | null; note: string; updatedAt: string | null };
+};
+export type OrderSummary = { configured: boolean; count: number; packed: number; overdue: number; orders: ShopOrder[]; error: string | null };

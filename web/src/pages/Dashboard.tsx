@@ -7,6 +7,7 @@ import { fmt, fmtK, monthLabel, shiftMonth, sum } from '../lib/format';
 import TxnTable from '../components/TxnTable';
 import TxnModal from '../components/TxnModal';
 import ProductionBoard from '../components/ProductionBoard';
+import { STAGE_LABEL, STAGE_PILL, ago, isLate, useOrderSummary } from '../lib/orders';
 import type { Txn } from '../lib/types';
 
 export default function Dashboard({ onAdd }: { onAdd: () => void }) {
@@ -54,6 +55,7 @@ export default function Dashboard({ onAdd }: { onAdd: () => void }) {
         <div className="tile"><span className="k">Owed to you</span><span className="v">{fmt(sum(openR, (i) => i.amountCents))}</span><span className="s">{openR.length} open · {openR.filter((i) => invStatus(i) === 'overdue').length} overdue</span></div>
         <div className="tile"><span className="k">You owe</span><span className="v">{fmt(sum(openP, (i) => i.amountCents))}</span><span className="s">{openP.length} open bill{openP.length === 1 ? '' : 's'}</span></div>
       </section>
+      <OrdersPanel />
       <ProductionBoard />
       <section className="grid2">
         <div className="panel">
@@ -116,5 +118,36 @@ function CatBars({ txns, month, limits }: { txns: Txn[]; month: string; limits: 
         );
       })}
     </>
+  );
+}
+
+function OrdersPanel() {
+  const { summary } = useOrderSummary();
+  const { shopify } = useBooks();
+  if (!shopify.configured || !summary) return null;
+  return (
+    <section className="panel">
+      <div className="panel-h">
+        <div>
+          <h2>Orders to fulfil</h2>
+          <p>{summary.error ? 'Couldn’t check Shopify just now.' : summary.count
+            ? `${summary.count} waiting${summary.packed ? ` · ${summary.packed} packed` : ''}${summary.overdue ? ` · ${summary.overdue} over 3 days old` : ''}`
+            : 'All caught up. New Shopify orders show up here.'}</p>
+        </div>
+        <Link to="/orders">{summary.count ? 'Open orders' : 'Orders'}</Link>
+      </div>
+      {summary.orders.length > 0 && (
+        <ul className="dash-orders">
+          {summary.orders.map((o) => (
+            <li key={o.id}>
+              <Link to="/orders" className="on">{o.name}</Link>
+              <span className="sum">{o.items.filter((i) => i.unfulfilled > 0).map((i) => `${i.unfulfilled}× ${i.title}${i.variant ? ` (${i.variant})` : ''}`).join(', ')}</span>
+              <span className={`when${isLate(o.createdAt) ? ' late' : ''}`}>{ago(o.createdAt)}</span>
+              <span className={`pill ${STAGE_PILL[o.task.stage]}`}>{STAGE_LABEL[o.task.stage]}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
