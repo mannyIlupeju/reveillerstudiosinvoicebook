@@ -27,9 +27,9 @@ const FIELDS: { key: Field; label: string; required?: boolean; guess: RegExp[] }
 
 const TEMPLATE = [
   ['Run name', 'Run date', 'Line', 'Units', 'Retail price', 'Wholesale price', 'Status', 'Vendor', 'Cost item', 'Cost amount', 'Cost category', 'Cost date', 'Notes'],
-  ['RVS Drop 01 hoodies', '2025-03-01', 'RVS', '50', '120', '60', 'Sold out', 'Fleece supplier', 'Blank hoodies', '1100', 'Blanks & Materials', '2025-02-20', 'First drop'],
+  ['RVS Drop 01 hoodies', '2025-03-01', 'RVS', '50', '120', '60', 'Closed', 'Fleece supplier', 'Blank hoodies', '1100', 'Blanks & Materials', '2025-02-20', 'First drop'],
   ['RVS Drop 01 hoodies', '', '', '', '', '', '', 'Toronto Embroidery', 'Front + back embroidery', '900', 'Production & Manufacturing', '2025-02-27', ''],
-  ['Reveillerstudios trousers', '2026-09-15', 'Reveillerstudios', '30', '180', '', 'In production', 'Pattern maker', 'Pattern + samples', '650', 'Samples & Development', '2026-08-30', ''],
+  ['Reveillerstudios trousers', '2026-09-15', 'Reveillerstudios', '30', '180', '', 'In progress', 'Pattern maker', 'Pattern + samples', '650', 'Samples & Development', '2026-08-30', ''],
 ];
 
 function guessCategory(text: string) {
@@ -42,7 +42,7 @@ function guessCategory(text: string) {
   if (/photo|shoot|content|model/.test(t)) return 'Photography & Content';
   return 'Production & Manufacturing';
 }
-const guessStatus = (v: string, fallback: string) => RUN_STATUSES.find((s) => s.toLowerCase() === v.toLowerCase()) || (/sold/i.test(v) ? 'Sold out' : /sell|live|launch/i.test(v) ? 'Selling' : /prod|making/i.test(v) ? 'In production' : /plan/i.test(v) ? 'Planning' : fallback);
+const guessStatus = (v: string, fallback: string) => RUN_STATUSES.find((s) => s.toLowerCase() === v.toLowerCase()) || (/hold|pause/i.test(v) ? 'On hold' : /closed|done|complete|sold|selling|live|launch/i.test(v) ? 'Closed' : /prod|making|progress/i.test(v) ? 'In progress' : /open|plan/i.test(v) ? 'Open' : fallback);
 const guessLine = (v: string, fallback: string) => (/^rvs/i.test(v) ? 'RVS' : /reveiller/i.test(v) ? 'Reveillerstudios' : /shared|both/i.test(v) ? 'Shared' : fallback);
 
 type Sheet = { name: string; rows: Cell[][] };
@@ -61,7 +61,7 @@ export default function ImportRuns() {
   const [sheetIdx, setSheetIdx] = useState(0);
   const [map, setMap] = useState<Record<Field, number>>({} as Record<Field, number>);
   const [defLine, setDefLine] = useState('RVS');
-  const [defStatus, setDefStatus] = useState('Sold out');
+  const [defStatus, setDefStatus] = useState('Closed');
   const [costMode, setCostMode] = useState<'history' | 'books'>('history');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

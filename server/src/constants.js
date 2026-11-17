@@ -6,7 +6,7 @@ export const EXPENSE_CATEGORIES = [
 export const INCOME_CATEGORIES = ['Online Sales', 'Wholesale', 'Events & Pop-ups', 'Custom Orders', 'Collaborations', 'Refunds', 'Other Income'];
 export const LINES = ['Shared', 'RVS', 'Reveillerstudios'];
 export const FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'yearly'];
-export const RUN_STATUSES = ['Planning', 'In production', 'Selling', 'Sold out'];
+export const RUN_STATUSES = ['Open', 'In progress', 'On hold', 'Closed'];
 
 export const DEFAULT_SETTINGS = {
   businessName: 'Reveiller Studios',

@@ -14,7 +14,7 @@ export const runs = Router();
 const runBody = z.object({
   name: z.string().trim().min(1).max(150),
   line: z.enum(LINES).default('RVS'),
-  status: z.enum(RUN_STATUSES).default('Planning'),
+  status: z.enum(RUN_STATUSES).default('Open'),
   units: z.number().int().positive().max(1e7),
   date: z.string().regex(DATE_RE),
   retailPriceCents: z.number().int().nonnegative().nullable().optional(),

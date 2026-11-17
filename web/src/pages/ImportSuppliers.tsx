@@ -73,7 +73,7 @@ export default function ImportSuppliers() {
   const [defCurrency, setDefCurrency] = useState('USD');
   const [defPlatform, setDefPlatform] = useState('Alibaba');
   const [line, setLine] = useState('Shared');
-  const [runStatus, setRunStatus] = useState('In production');
+  const [runStatus, setRunStatus] = useState('In progress');
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);

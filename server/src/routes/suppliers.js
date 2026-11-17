@@ -85,7 +85,7 @@ r.post('/import', requireRole('EDITOR'), ah(async (req, res) => {
   const { rows, line, runStatus } = parse(z.object({
     rows: z.array(importRow).min(1).max(500),
     line: z.enum(LINES).default('Shared'),
-    runStatus: z.enum(RUN_STATUSES).default('In production'),
+    runStatus: z.enum(RUN_STATUSES).default('In progress'),
   }), req.body);
 
   // Look up every exchange rate first, so a Bank of Canada hiccup fails the whole import cleanly.

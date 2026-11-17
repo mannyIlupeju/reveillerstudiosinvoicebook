@@ -5,7 +5,7 @@ export const EXPENSE_CATEGORIES = [
 ];
 export const INCOME_CATEGORIES = ['Online Sales', 'Wholesale', 'Events & Pop-ups', 'Custom Orders', 'Collaborations', 'Refunds', 'Other Income'];
 export const LINES = ['Shared', 'RVS', 'Reveillerstudios'];
-export const RUN_STATUSES = ['Planning', 'In production', 'Selling', 'Sold out'];
+export const RUN_STATUSES = ['Open', 'In progress', 'On hold', 'Closed'];
 export const FREQ: Record<string, string> = { weekly: 'Weekly', monthly: 'Monthly', quarterly: 'Quarterly', yearly: 'Yearly' };
 
 const CAD = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' });
@@ -56,3 +56,5 @@ const SYMBOL: Record<string, string> = { USD: 'US$', EUR: '€', GBP: '£', CNY:
 export const fmtCur = (cents: number, currency: string) => `${SYMBOL[currency] || currency + ' '}${((cents || 0) / 100).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** Expense categories where tracking the supplier is most useful. */
 export const PRODUCTION_CATEGORIES = ['Production & Manufacturing', 'Blanks & Materials', 'Samples & Development', 'Packaging & Shipping'];
+/** Pill style for each production run status. */
+export const STATUS_PILL: Record<string, string> = { Open: '', 'In progress': 'accent', 'On hold': 'crit', Closed: 'good' };

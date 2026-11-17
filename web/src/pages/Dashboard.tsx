@@ -6,6 +6,7 @@ import { alerts, inMonth, invStatus, spendByCat, totals } from '../lib/derive';
 import { fmt, fmtK, monthLabel, shiftMonth, sum } from '../lib/format';
 import TxnTable from '../components/TxnTable';
 import TxnModal from '../components/TxnModal';
+import ProductionBoard from '../components/ProductionBoard';
 import type { Txn } from '../lib/types';
 
 export default function Dashboard({ onAdd }: { onAdd: () => void }) {
@@ -53,6 +54,7 @@ export default function Dashboard({ onAdd }: { onAdd: () => void }) {
         <div className="tile"><span className="k">Owed to you</span><span className="v">{fmt(sum(openR, (i) => i.amountCents))}</span><span className="s">{openR.length} open · {openR.filter((i) => invStatus(i) === 'overdue').length} overdue</span></div>
         <div className="tile"><span className="k">You owe</span><span className="v">{fmt(sum(openP, (i) => i.amountCents))}</span><span className="s">{openP.length} open bill{openP.length === 1 ? '' : 's'}</span></div>
       </section>
+      <ProductionBoard />
       <section className="grid2">
         <div className="panel">
           <div className="panel-h"><h2>Last 6 months</h2><div className="legend"><span><i style={{ background: 'var(--good)' }} />In</span><span><i style={{ background: 'var(--ink)' }} />Out</span></div></div>

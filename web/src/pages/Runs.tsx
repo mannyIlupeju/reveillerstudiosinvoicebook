@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import Modal from '../components/Modal';
 import TxnModal from '../components/TxnModal';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
-import { CURRENCIES, LINES, RUN_STATUSES, centsInput, dayLabelY, fmt, fmtCur, sum, toCents, today } from '../lib/format';
+import { CURRENCIES, LINES, RUN_STATUSES, STATUS_PILL, centsInput, dayLabelY, fmt, fmtCur, sum, toCents, today } from '../lib/format';
 import { runOrder, runStats, type OrderStatus } from '../lib/derive';
 import { SupplierSelect } from '../components/SupplierFields';
 import type { Run, Txn } from '../lib/types';
@@ -19,7 +19,9 @@ export default function Runs() {
   const { runs, txns, invoices, suppliers } = useBooks();
   const [editing, setEditing] = useState<Run | 'new' | null>(null);
   const [costFor, setCostFor] = useState<Run | null>(null);
-  const [supplierFilter, setSupplierFilter] = useState('all');
+  const [params] = useSearchParams();
+  const [supplierFilter, setSupplierFilter] = useState(params.get('supplier') || 'all');
+  const [statusFilter, setStatusFilter] = useState(params.get('status') || 'all');
   const [payFilter, setPayFilter] = useState<'all' | 'owing'>('all');
   const editor = canEdit(user);
   const usedSuppliers = suppliers.filter((s) => runs.some((r) => r.supplierId === s.id));
@@ -28,7 +30,8 @@ export default function Runs() {
   const owing = orders.filter((o) => o.owed && o.owed > 0);
   const owingCad = sum(owing, (o) => o.owedCad || 0);
   const unknownCad = owing.some((o) => o.owedCad === null);
-  const shown = runs.filter((r) => (supplierFilter === 'all' || (supplierFilter === 'none' ? !r.supplierId : r.supplierId === supplierFilter))
+  const shown = runs.filter((r) => (statusFilter === 'all' || (statusFilter === 'active' ? r.status !== 'Closed' : r.status === statusFilter))
+    && (supplierFilter === 'all' || (supplierFilter === 'none' ? !r.supplierId : r.supplierId === supplierFilter))
     && (payFilter === 'all' || ['quoted', 'deposit'].includes(runOrder(r, txns, invoices).status)));
 
   return (
@@ -44,6 +47,11 @@ export default function Runs() {
               <option value="all">All suppliers</option>
               {usedSuppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               <option value="none">No supplier</option>
+            </select>
+            <select aria-label="Status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">All statuses</option>
+              <option value="active">Not closed</option>
+              {RUN_STATUSES.map((st) => <option key={st} value={st}>{st}</option>)}
             </select>
             <select aria-label="Payment" value={payFilter} onChange={(e) => setPayFilter(e.target.value as 'all')}>
               <option value="all">All payment states</option>
@@ -82,7 +90,7 @@ export default function Runs() {
                 <div>
                   <h3>{r.name}</h3>
                   <div className="meta"><span className="chip">{r.line}</span><span>{dayLabelY(r.date)}</span><span>{r.units} units</span>
-                    <span className={`pill ${r.status === 'Selling' ? 'good' : r.status === 'In production' ? 'accent' : ''}`}>{r.status}</span></div>
+                    <span className={`pill ${STATUS_PILL[r.status] ?? ''}`}>{r.status}</span></div>
                 </div>
 
                 {o.owed !== null && o.owed > 0 ? (
@@ -156,7 +164,7 @@ export function RunModal({ run, onClose }: { run: Run | null; onClose: () => voi
   const order = run ? runOrder(run, txns, invoices) : null;
   const [name, setName] = useState(run?.name || '');
   const [line, setLine] = useState(run?.line || 'RVS');
-  const [status, setStatus] = useState(run?.status || 'Planning');
+  const [status, setStatus] = useState(run?.status || 'Open');
   const [units, setUnits] = useState(run ? String(run.units) : '');
   const [date, setDate] = useState(run?.date || today());
   const [retail, setRetail] = useState(centsInput(run?.retailPriceCents));
