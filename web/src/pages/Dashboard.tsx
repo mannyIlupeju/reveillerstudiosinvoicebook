@@ -8,7 +8,7 @@ import TxnTable from '../components/TxnTable';
 import TxnModal from '../components/TxnModal';
 import type { Txn } from '../lib/types';
 
-export default function Overview({ onAdd }: { onAdd: () => void }) {
+export default function Dashboard({ onAdd }: { onAdd: () => void }) {
   const [month] = useMonth();
   const { user } = useAuth();
   const { txns, invoices, rules, limits } = useBooks();
@@ -59,7 +59,7 @@ export default function Overview({ onAdd }: { onAdd: () => void }) {
           <Chart txns={txns} month={month} />
         </div>
         <div className="panel">
-          <div className="panel-h"><h2>Spending by category</h2><p>{monthLabel(month)} · blue tick = budget</p></div>
+          <div className="panel-h"><h2>Spending by category</h2><p>{monthLabel(month)} · orange tick = budget</p></div>
           <CatBars txns={txns} month={month} limits={limits} />
         </div>
       </section>

@@ -32,7 +32,7 @@ async function accessToken() {
     const body = await res.text();
     const code = body.match(/Oauth error (\w+)/i)?.[1] || '';
     const hints = {
-      app_not_installed: 'The Reveiller Books app isn’t installed on your store yet. Install it from the Shopify Dev Dashboard, then try again.',
+      app_not_installed: 'The Reveillerstudios CRM app isn’t installed on your store yet. Install it from the Shopify Dev Dashboard, then try again.',
       shop_not_permitted: 'This store isn’t in the same Shopify organization as the app. Create the app from the Dev Dashboard of the account that owns the store.',
       invalid_client: 'Shopify didn’t accept the client ID or secret. Check SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET on the server.',
     };
@@ -74,7 +74,7 @@ function userErrors(errs) {
 export async function createDraftOrder(inv, { chargeTax = false } = {}) {
   const items = Array.isArray(inv.items) && inv.items.length ? inv.items : [{ description: `Invoice ${inv.number}`, quantity: 1, unitPriceCents: inv.amountCents }];
   const input = {
-    note: `Reveiller Books invoice ${inv.number}${inv.notes ? `\n${inv.notes}` : ''}`,
+    note: `Reveillerstudios invoice ${inv.number}${inv.notes ? `\n${inv.notes}` : ''}`,
     tags: ['reveiller-books', `invoice-${inv.number}`.slice(0, 40)],
     taxExempt: !chargeTax,
     lineItems: items.map((it) => ({

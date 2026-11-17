@@ -36,7 +36,8 @@ export default function AcceptInvite() {
   return (
     <div className="auth">
       <form onSubmit={submit}>
-        <h1>Reveiller Books</h1>
+        <h1><img src="/brand/wordmark.svg" alt="Reveillerstudios" /></h1>
+        <span className="tag">CRM</span>
         {invite ? (
           <>
             <p>You’ve been invited as {invite.role === 'EDITOR' ? 'an editor' : 'a viewer'} with <b>{invite.email}</b>. Set your name and a password to join.</p>

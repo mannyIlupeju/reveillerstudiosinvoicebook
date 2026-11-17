@@ -31,8 +31,9 @@ export default function Login() {
   return (
     <div className="auth">
       <form onSubmit={submit}>
-        <h1>Reveiller Books</h1>
-        <p>{needsSetup ? 'Create the owner account. You’ll invite Mabel and Tony from the Team page afterwards.' : 'Sign in to the studio’s books.'}</p>
+        <h1><img src="/brand/wordmark.svg" alt="Reveillerstudios" /></h1>
+        <span className="tag">CRM</span>
+        <p>{needsSetup ? 'Create the owner account. You’ll invite Mabel and Tony from the Team page afterwards.' : 'Sign in to the studio’s CRM.'}</p>
         {needsSetup && (
           <>
             <label className="field">Setup code<input id="setup" value={setupToken} onChange={(e) => setSetupToken(e.target.value)} autoComplete="off" placeholder="From the server’s SETUP_TOKEN" /></label>

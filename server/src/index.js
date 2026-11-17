@@ -30,8 +30,9 @@ app.use(helmet({
       'img-src': ["'self'", 'data:', 'blob:', 'https://cdn.shopify.com'],
       'frame-src': ["'self'"],
       'object-src': ["'self'"],
-      'font-src': ["'self'", 'https://fonts.gstatic.com'],
-      'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      'font-src': ["'self'", 'https://fonts.gstatic.com', 'https://use.typekit.net'],
+      'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://use.typekit.net', 'https://p.typekit.net'],
+      'connect-src': ["'self'", 'https://p.typekit.net'],
     },
   },
   crossOriginEmbedderPolicy: false,
@@ -81,7 +82,7 @@ app.use((err, _req, res, _next) => {
 
 await migrate();
 app.listen(PORT, () => {
-  console.log(`Reveiller Books listening on :${PORT}`);
+  console.log(`Reveillerstudios CRM listening on :${PORT}`);
   // Log due recurring charges and check Shopify for payments now and every 15 minutes.
   setTimeout(runJobs, 5_000);
   setInterval(runJobs, 15 * 60 * 1000);

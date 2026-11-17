@@ -1,4 +1,4 @@
-# Reveiller Books
+# Reveillerstudios CRM
 
 Bookkeeping for Reveiller Studios: expenses and income, production runs with unit costs and margins, monthly budgets, recurring charges, receipts, bank CSV import, and client invoices that clients pay through Shopify.
 
@@ -49,7 +49,7 @@ Optional: add a custom domain such as `books.reveillerstudios.com` under the ser
 
 The app creates a Shopify **draft order** for each client invoice. Shopify hosts the secure checkout and can email the invoice. When the client pays, the draft order completes and the app marks the invoice paid and logs the income.
 
-1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard) with the account that owns the store, and **create an app** (for example "Reveiller Books").
+1. Go to the [Shopify Dev Dashboard](https://dev.shopify.com/dashboard) with the account that owns the store, and **create an app** (for example "Reveillerstudios CRM").
 2. On the app's version, grant the Admin API scopes `write_draft_orders`, `read_draft_orders`, `read_orders`, `read_products` and `read_inventory`, then release the version. (The last two power the Inventory page.)
 3. Install the app on your store.
 4. Copy the app's **Client ID** and **Client secret**.
