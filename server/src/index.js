@@ -15,6 +15,7 @@ import invoiceRoutes, { publicInvoices, shopifyWebhook } from './routes/invoices
 import inventoryRoutes from './routes/inventory.js';
 import supplierRoutes, { fxRoutes } from './routes/suppliers.js';
 import orderRoutes from './routes/orders.js';
+import stockRoutes, { stockPhotos } from './routes/stock.js';
 import { runJobs } from './jobs.js';
 
 const app = express();
@@ -63,6 +64,8 @@ app.use('/api/invoices', invoiceRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/suppliers', supplierRoutes);
 app.use('/api/orders', orderRoutes);
+app.use('/api/stock', stockRoutes);
+app.use('/api/stock-photos', stockPhotos);
 app.use('/api/fx', fxRoutes);
 app.use('/api/settings', settings);
 app.use('/api/activity', activity);

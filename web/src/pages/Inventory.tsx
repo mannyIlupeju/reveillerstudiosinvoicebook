@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Modal from '../components/Modal';
+import StockModal, { STOCK_CATEGORIES } from '../components/StockModal';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { canEdit, useAuth, useBooks, useToast } from '../lib/store';
-import { centsInput, fmt, sum, toCents } from '../lib/format';
+import { centsInput, fmt, fmtCur, sum, toCents } from '../lib/format';
 import { runStats } from '../lib/derive';
-import type { InventoryItem, Run, SyncStatus, Txn } from '../lib/types';
+import type { InventoryItem, Run, StockItem, SyncStatus, Txn } from '../lib/types';
 
 const DEFAULT_LOW = 2;
 type Stock = 'out' | 'low' | 'ok' | 'untracked';
@@ -23,7 +25,7 @@ function unitCost(i: InventoryItem, runs: Run[], txns: Txn[]): { cents: number |
   return { cents: null, source: '' };
 }
 
-export default function Inventory() {
+function ShopifyInventory() {
   const { user } = useAuth();
   const { runs, txns, shopify } = useBooks();
   const toast = useToast();
@@ -72,14 +74,14 @@ export default function Inventory() {
   const attention = active.filter((i) => i.stock === 'out' || i.stock === 'low');
   const missingCost = active.filter((i) => i.cost.cents == null && i.quantity > 0).length;
 
-  if (!shopify.configured) return <div className="welcome"><h2>Connect Shopify to see inventory</h2><p>Stock levels come from your Shopify store. Once the Shopify keys are on the server, products show up here automatically.</p></div>;
+  if (!shopify.configured) return <div className="welcome"><h2>Shopify isn’t connected</h2><p>Shopify products and stock levels show up here once the Shopify keys are on the server. Items you add yourself are under Studio items.</p></div>;
 
   return (
     <>
       <section className="panel">
         <div className="panel-h">
           <div>
-            <h2>Inventory</h2>
+            <h2>Shopify products</h2>
             <p>Stock levels come from Shopify and refresh every 15 minutes. Set unit costs here, or link a product to a production run, to see what your stock is worth.</p>
           </div>
           <div className="row">
@@ -185,5 +187,144 @@ function ItemModal({ item, onClose, onSaved }: { item: InventoryItem; onClose: (
       <label className="row" style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 22 }}><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} style={{ minHeight: 0 }} />Apply to all variants of this product</label>
       <p className="hint full">Leave the unit cost empty to use the linked run’s cost per unit (its tagged expenses ÷ units). A cost typed here always wins.</p>
     </Modal>
+  );
+}
+
+export default function Inventory() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'shopify' ? 'shopify' : 'studio';
+  return (
+    <>
+      <div className="toggle tabs" role="tablist" aria-label="Inventory">
+        <button role="tab" aria-selected={tab === 'studio'} className={tab === 'studio' ? 'on' : ''} onClick={() => setParams({})}>Studio items</button>
+        <button role="tab" aria-selected={tab === 'shopify'} className={tab === 'shopify' ? 'on' : ''} onClick={() => setParams({ tab: 'shopify' })}>Shopify products</button>
+      </div>
+      {tab === 'studio' ? <StudioItems /> : <ShopifyInventory />}
+    </>
+  );
+}
+
+type Kind = 'all' | string;
+function StudioItems() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const editor = canEdit(user);
+  const [items, setItems] = useState<StockItem[] | null>(null);
+  const [err, setErr] = useState('');
+  const [query, setQuery] = useState('');
+  const [kind, setKind] = useState<Kind>('all');
+  const [editing, setEditing] = useState<StockItem | null | 'new'>(null);
+
+  const load = useCallback(async () => {
+    try { setItems((await api<{ items: StockItem[] }>('/stock')).items); setErr(''); }
+    catch (e: any) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const bump = async (it: StockItem, d: number) => {
+    const quantity = Math.max(0, it.quantity + d);
+    setItems((xs) => xs && xs.map((x) => (x.id === it.id ? { ...x, quantity } : x)));
+    try { await api(`/stock/${it.id}`, { method: 'PATCH', body: { quantity } }); }
+    catch (e: any) { toast(e.message); load(); }
+  };
+
+  const all = items || [];
+  const colours = [...new Set(all.map((i) => i.colour).filter(Boolean))].sort();
+  const q = query.trim().toLowerCase();
+  const shown = all.filter((i) => (kind === 'all' || i.category === kind)
+    && (!q || [i.name, i.size, i.colour, i.sku, i.supplierName, i.notes].join(' ').toLowerCase().includes(q)));
+  const units = sum(all, (i) => i.quantity);
+  const costItems = all.filter((i) => i.priceKind === 'COST' && i.priceCadCents != null);
+  const retailItems = all.filter((i) => i.priceKind === 'RETAIL' && i.priceCadCents != null);
+
+  return (
+    <>
+      <section className="panel">
+        <div className="panel-h">
+          <div>
+            <h2>Studio items</h2>
+            <p>Pieces, samples, materials and packaging you track yourself, outside Shopify. Prices can be in CAD or USD; USD is converted to CAD when saved.</p>
+          </div>
+          {editor && <button className="btn primary" onClick={() => setEditing('new')}>+ Add item</button>}
+        </div>
+        {err && <div className="banner crit">{err}</div>}
+      </section>
+
+      {items && all.length > 0 && (
+        <section className="tiles">
+          <div className="tile"><span className="k">Items</span><span className="v">{all.length}</span><span className="s">{units.toLocaleString('en-CA')} units on hand</span></div>
+          <div className="tile"><span className="k">Value at cost</span><span className="v">{fmt(sum(costItems, (i) => i.quantity * (i.priceCadCents || 0)))}</span><span className="s">{costItems.length} item{costItems.length === 1 ? '' : 's'} with a cost</span></div>
+          <div className="tile"><span className="k">Value at selling price</span><span className="v">{fmt(sum(retailItems, (i) => i.quantity * (i.priceCadCents || 0)))}</span><span className="s">{retailItems.length} item{retailItems.length === 1 ? '' : 's'} with a selling price</span></div>
+          <div className="tile"><span className="k">Out of stock</span><span className={`v ${all.some((i) => i.quantity === 0) ? 'neg' : ''}`}>{all.filter((i) => i.quantity === 0).length}</span><span className="s">Items at zero</span></div>
+        </section>
+      )}
+
+      {items && all.length === 0 && (
+        <div className="welcome">
+          <h2>Nothing added yet</h2>
+          <p>Add finished pieces, samples, fabric, trims like patches and buttons, or packaging. Each item can have photos, a size, a colour and a price in CAD or USD.</p>
+          {editor && <button className="btn primary" onClick={() => setEditing('new')}>+ Add your first item</button>}
+        </div>
+      )}
+
+      {items && all.length > 0 && (
+        <section className="panel">
+          <div className="filters">
+            <select aria-label="Type" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="all">All types</option>
+              {STOCK_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <input type="search" aria-label="Search items" placeholder="Search name, size, colour, supplier" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          {shown.length ? (
+            <div className="stock-grid">
+              {shown.map((i) => (
+                <article key={i.id} className="stock-card">
+                  <button className="stock-photo" onClick={() => editor && setEditing(i)} aria-label={editor ? `Edit ${i.name}` : i.name} disabled={!editor}>
+                    {i.photoIds[0] ? <img src={`/api/stock-photos/${i.photoIds[0]}`} alt="" loading="lazy" /> : <span className="nophoto">No photo</span>}
+                    {i.photoIds.length > 1 && <span className="count">{i.photoIds.length} photos</span>}
+                  </button>
+                  <div className="stock-body">
+                    <div className="stock-title">
+                      <h3>{editor ? <button className="linkish" onClick={() => setEditing(i)}>{i.name}</button> : i.name}</h3>
+                      <span className="pill">{i.category}</span>
+                    </div>
+                    {(i.size || i.colour) && (
+                      <div className="chips">
+                        {i.size && <span className="chip"><span className="k">Size</span>{i.size}</span>}
+                        {i.colour && <span className="chip"><span className="k">Colour</span>{i.colour}</span>}
+                      </div>
+                    )}
+                    <div className="stock-price">
+                      {i.priceCents != null ? (
+                        <>
+                          <b>{fmtCur(i.priceCents, i.currency)}</b>
+                          {i.currency === 'USD' && i.priceCadCents != null && <span className="muted">≈ {fmt(i.priceCadCents)} CAD</span>}
+                          <span className="muted">{i.priceKind === 'COST' ? 'cost each' : 'selling price'}</span>
+                        </>
+                      ) : <span className="muted">No price</span>}
+                    </div>
+                    {i.supplierName && <div className="muted small">From {i.supplierName}</div>}
+                    <div className="stock-qty">
+                      {editor ? (
+                        <div className="stepper" aria-label={`Quantity of ${i.name}`}>
+                          <button aria-label="One fewer" onClick={() => bump(i, -1)} disabled={i.quantity === 0}>−</button>
+                          <span className="num">{i.quantity}</span>
+                          <button aria-label="One more" onClick={() => bump(i, 1)}>+</button>
+                        </div>
+                      ) : <span className="num">{i.quantity}</span>}
+                      <span className="muted">on hand</span>
+                      {i.quantity === 0 && <span className="pill crit">Out</span>}
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <div className="empty">No items match.</div>}
+        </section>
+      )}
+      {!items && !err && <div className="center muted">Loading…</div>}
+      {editing && <StockModal item={editing === 'new' ? null : editing} colours={colours} onClose={() => setEditing(null)} onSaved={load} />}
+    </>
   );
 }

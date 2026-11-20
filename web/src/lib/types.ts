@@ -139,3 +139,24 @@ export type ShopOrder = {
   task: { stage: OrderStage; assignedTo: string | null; note: string; updatedAt: string | null };
 };
 export type OrderSummary = { configured: boolean; count: number; packed: number; overdue: number; orders: ShopOrder[]; error: string | null };
+
+export type StockItem = {
+  id: string;
+  name: string;
+  category: string;
+  size: string;
+  colour: string;
+  quantity: number;
+  priceCents: number | null;
+  currency: 'CAD' | 'USD';
+  priceCadCents: number | null;
+  fxRate: string | number | null;
+  priceKind: 'COST' | 'RETAIL';
+  supplierId: string | null;
+  supplierName: string | null;
+  sku: string;
+  notes: string;
+  photoIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
